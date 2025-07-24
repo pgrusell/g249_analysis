@@ -139,6 +139,14 @@ int main(int argc, char **argv)
     int nEvents = evt->GetEntries();
     for (int iEvent = 0; iEvent < nEvents; ++iEvent)
     {
+
+        if (iEvent % 10000 == 0 || iEvent == nEvents - 1)
+        {
+            float percent = 100.0f * iEvent / nEvents;
+            printf("\rProcessing events... %.1f%%", percent);
+            fflush(stdout);
+        }
+
         evt->GetEntry(iEvent);
         int nHitFoot = footDataArray->GetEntries();
         int nHitLos = losDataArray->GetEntries();
