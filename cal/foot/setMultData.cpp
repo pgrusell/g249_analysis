@@ -1,13 +1,3 @@
-// This macro analyzes the data from a losHit, footHit and footCal data file, to fill the following histograms:
-// :etaFootAsicChar: eta vs energy. One histogram per Foot, asic and charge (8 and 9)
-// :etaFootAsic: eta vs energy. One histogram per Foot, asic
-// :etaFootAsicMult: eta vs energy. One histogram per Foot, asic and multiplicity
-// :posFootChar: energy vs position. One histogram per FOOT and charge in LOS
-// :posFootMult: energy vs position. One histogram per FOOT and multiplicity
-// :chargeEnergyFootAsic: charge correlation FOOT vs LOS. One histogram per FOOT and ASIC
-// :chargeEnergyFootAsicMult: charge correlation FOOT vs LOS. One histogram per FOOT, ASIC and multiplicity
-// :hChargeFull: Energy spectra in LOS
-
 // Includes
 #include "R3BFootCalData.h"
 #include "R3BFootHitData.h"
@@ -26,8 +16,7 @@
 
 int main(int argc, char **argv)
 {
-    TString inFilePath =
-        "/nucl_lustre/pablogrusell/g249/g249_analysis/root_files/etaCorrection/g249_data_incoming_online_20250724_125717.root";
+    TString inFilePath = "/nucl_lustre/pablogrusell/g249/g249_analysis/root_files/etaCorrection/g249_data_incoming_online_20250724_125717.root";
     TString outFilePath = "/nucl_lustre/pablogrusell/g249/g249_analysis/root_files/etaCorrection/foot_etaplot_mult.root";
 
     if (argc > 1)
@@ -41,7 +30,6 @@ int main(int argc, char **argv)
     const int nStrips = 640;
     const int maxMult = 4;
 
-    // Open input ROOT file
     auto *inFile = new TFile(inFilePath, "READ");
     if (!inFile || inFile->IsZombie())
     {
@@ -56,7 +44,6 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    // Branches
     evt->SetBranchStatus("*", 0);
     evt->SetBranchStatus("FootHitData*", 1);
     evt->SetBranchStatus("FootCalData*", 1);
@@ -71,22 +58,20 @@ int main(int argc, char **argv)
     auto *losDataArray = new TClonesArray("R3BLosHitData");
     evt->SetBranchAddress("LosHit", &losDataArray);
 
-    // Histograms
-    std::vector<std::vector<std::vector<TH2F *>>> etaFootAsicChar(
-        nFoots, std::vector<std::vector<TH2F *>>(nAsics, std::vector<TH2F *>(nCharges, nullptr)));
-    std::vector<std::vector<TH2F *>> posFootChar(nFoots, std::vector<TH2F *>(nCharges, nullptr));
+    // Existing histograms (placeholders)
+    std::vector<std::vector<std::vector<TH2F *>>> etaFootAsicMult(nFoots, std::vector<std::vector<TH2F *>>(nAsics, std::vector<TH2F *>(maxMult, nullptr)));
+    std::vector<std::vector<std::vector<std::vector<TH2F *>>>> etaFootAsicMultChar(nFoots, std::vector<std::vector<std::vector<TH2F *>>>(nAsics, std::vector<std::vector<TH2F *>>(maxMult, std::vector<TH2F *>(nCharges, nullptr))));
     std::vector<std::vector<TH2F *>> etaFootAsic(nFoots, std::vector<TH2F *>(nAsics, nullptr));
-    std::vector<std::vector<std::vector<TH2F *>>> etaFootAsicMult(
-        nFoots, std::vector<std::vector<TH2F *>>(nAsics, std::vector<TH2F *>(maxMult, nullptr)));
+    std::vector<std::vector<std::vector<TH2F *>>> etaFootAsicChar(nFoots, std::vector<std::vector<TH2F *>>(nAsics, std::vector<TH2F *>(nCharges, nullptr)));
+    std::vector<std::vector<TH2F *>> posFootChar(nFoots, std::vector<TH2F *>(nCharges, nullptr));
     std::vector<TH2F *> posFoot(nFoots, nullptr);
+    std::vector<std::vector<std::vector<TH2F *>>> posFootMult(nFoots, std::vector<std::vector<TH2F *>>(maxMult, std::vector<TH2F *>(1, nullptr)));
     std::vector<std::vector<TH2F *>> chargeEnergyFootAsic(nFoots, std::vector<TH2F *>(nAsics, nullptr));
+    std::vector<std::vector<std::vector<TH2F *>>> chargeEnergyFootAsicMult(nFoots, std::vector<std::vector<TH2F *>>(nAsics, std::vector<TH2F *>(maxMult, nullptr)));
     std::vector<TH2F *> stripEnergyFoot(nFoots, nullptr);
-    std::vector<std::vector<std::vector<TH2F *>>> posFootMult(
-        nFoots, std::vector<std::vector<TH2F *>>(maxMult, std::vector<TH2F *>(1, nullptr)));
-    std::vector<std::vector<std::vector<TH2F *>>> chargeEnergyFootAsicMult(
-        nFoots, std::vector<std::vector<TH2F *>>(nAsics, std::vector<TH2F *>(maxMult, nullptr)));
     TH1F *hChargeFull = new TH1F("charge_full", "Charge full spectrum", 150, 0, 15);
 
+    // Create histograms
     for (int iFoot = 0; iFoot < nFoots; ++iFoot)
     {
         auto namePos = Form("pos_foot_%i", iFoot);
@@ -115,6 +100,13 @@ int main(int argc, char **argv)
                 auto nameEtaM = Form("eta_foot_%i_asic_%i_mult_%i", iFoot, iAsic, m + 1);
                 auto titleEtaM = Form("Eta vs Energy for Foot %i, ASIC %i, mult %i", iFoot, iAsic, m + 1);
                 etaFootAsicMult[iFoot][iAsic][m] = new TH2F(nameEtaM, titleEtaM, 100, 0, 1, 1000, 0, 5000);
+
+                for (int c = 0; c < nCharges; ++c)
+                {
+                    auto nameEtaC = Form("eta_foot_%i_asic_%i_mult_%i_charge_%i", iFoot, iAsic, m + 1, c);
+                    auto titleEtaC = Form("Eta vs Energy (foot %i, asic %i, mult %i, charge %i)", iFoot, iAsic, m + 1, c);
+                    etaFootAsicMultChar[iFoot][iAsic][m][c] = new TH2F(nameEtaC, titleEtaC, 100, 0, 1, 1000, 0, 5000);
+                }
             }
 
             auto nameCharge = Form("charge_full_vs_energy_foot_%i_asic_%i", iFoot, iAsic);
@@ -125,37 +117,28 @@ int main(int argc, char **argv)
             {
                 auto nameChargeM = Form("charge_full_vs_energy_foot_%i_asic_%i_mult_%i", iFoot, iAsic, m + 1);
                 auto titleChargeM = Form("Charge full vs Energy for Foot %i, ASIC %i, mult %i", iFoot, iAsic, m + 1);
-                chargeEnergyFootAsicMult[iFoot][iAsic][m] =
-                    new TH2F(nameChargeM, titleChargeM, 200, 0, 15, 1000, 0, 5000);
+                chargeEnergyFootAsicMult[iFoot][iAsic][m] = new TH2F(nameChargeM, titleChargeM, 200, 0, 15, 1000, 0, 5000);
+            }
+
+            for (int c = 0; c < nCharges; ++c)
+            {
+                auto nameEtaC = Form("eta_foot_%i_asic_%i_char_%i", iFoot, iAsic, c);
+                auto titleEtaC = Form("Eta vs Energy for Foot %i, ASIC %i, Charge %i", iFoot, iAsic, c);
+                etaFootAsicChar[iFoot][iAsic][c] = new TH2F(nameEtaC, titleEtaC, 100, 0, 1, 1000, 0, 5000);
             }
         }
 
-        for (int iCharge = 0; iCharge < nCharges; ++iCharge)
+        for (int c = 0; c < nCharges; ++c)
         {
-            auto namePosC = Form("pos_foot_%i_char_%i", iFoot, iCharge);
-            auto titlePosC = Form("Energy vs Position for Foot %i, Charge %i", iFoot, iCharge);
-            posFootChar[iFoot][iCharge] = new TH2F(namePosC, titlePosC, 640, 0, 640, 1000, 0, 5000);
-
-            for (int iAsic = 0; iAsic < nAsics; ++iAsic)
-            {
-                auto nameEtaC = Form("eta_foot_%i_asic_%i_char_%i", iFoot, iAsic, iCharge);
-                auto titleEtaC = Form("Eta vs Energy for Foot %i, ASIC %i, Charge %i", iFoot, iAsic, iCharge);
-                etaFootAsicChar[iFoot][iAsic][iCharge] = new TH2F(nameEtaC, titleEtaC, 100, 0, 1, 1000, 0, 5000);
-            }
+            auto namePosC = Form("pos_foot_%i_char_%i", iFoot, c);
+            auto titlePosC = Form("Energy vs Position for Foot %i, Charge %i", iFoot, c);
+            posFootChar[iFoot][c] = new TH2F(namePosC, titlePosC, 640, 0, 640, 1000, 0, 5000);
         }
     }
 
-    // Event loop
     int nEvents = evt->GetEntries();
     for (int iEvent = 0; iEvent < nEvents; ++iEvent)
     {
-        if (iEvent % 10000 == 0 || iEvent == nEvents - 1)
-        {
-            float percent = 100.0f * iEvent / nEvents;
-            printf("\rProcessing events... %.1f%%", percent);
-            fflush(stdout);
-        }
-
         evt->GetEntry(iEvent);
         int nHitFoot = footDataArray->GetEntries();
         int nHitLos = losDataArray->GetEntries();
@@ -192,10 +175,14 @@ int main(int argc, char **argv)
                 continue;
 
             etaFootAsic[footId][asic]->Fill(eta, energy);
+            if (charge >= 0 && charge < nCharges)
+                etaFootAsicChar[footId][asic][charge]->Fill(eta, energy);
 
             if (mult >= 1 && mult <= maxMult)
             {
                 etaFootAsicMult[footId][asic][mult - 1]->Fill(eta, energy);
+                if (charge >= 0 && charge < nCharges)
+                    etaFootAsicMultChar[footId][asic][mult - 1][charge]->Fill(eta, energy);
                 posFootMult[footId][mult - 1][0]->Fill(pos, energy);
                 chargeEnergyFootAsicMult[footId][asic][mult - 1]->Fill(charge_full, energy);
             }
@@ -204,13 +191,7 @@ int main(int argc, char **argv)
             {
                 posFoot[footId]->Fill(pos, energy);
                 chargeEnergyFootAsic[footId][asic]->Fill(charge_full, energy);
-            }
-
-            if (charge >= 0 && charge < nCharges)
-            {
-                etaFootAsicChar[footId][asic][charge]->Fill(eta, energy);
-
-                if (mult <= 1)
+                if (charge >= 0 && charge < nCharges)
                     posFootChar[footId][charge]->Fill(pos, energy);
             }
         }
@@ -227,56 +208,52 @@ int main(int argc, char **argv)
         }
     }
 
-    // Write output
     auto *fileOut = new TFile(outFilePath, "RECREATE");
 
+    for (auto &footVec : etaFootAsic)
+        for (auto *hist : footVec)
+            if (hist)
+                hist->Write();
     for (auto &footVec : etaFootAsicChar)
         for (auto &asicVec : footVec)
-            for (auto &hist : asicVec)
+            for (auto *hist : asicVec)
                 if (hist)
                     hist->Write();
-
-    for (auto &footVec : posFootChar)
-        for (auto &hist : footVec)
-            if (hist)
-                hist->Write();
-
-    for (auto &footVec : etaFootAsic)
-        for (auto &hist : footVec)
-            if (hist)
-                hist->Write();
-
     for (auto &footVec : etaFootAsicMult)
         for (auto &asicVec : footVec)
             for (auto *hist : asicVec)
                 if (hist)
                     hist->Write();
-
+    for (auto &footVec : etaFootAsicMultChar)
+        for (auto &asicVec : footVec)
+            for (auto &multVec : asicVec)
+                for (auto *hist : multVec)
+                    if (hist)
+                        hist->Write();
     for (auto *hist : posFoot)
         if (hist)
             hist->Write();
-
-    for (auto &footVec : chargeEnergyFootAsic)
+    for (auto &footVec : posFootChar)
         for (auto *hist : footVec)
             if (hist)
                 hist->Write();
-
-    for (auto *hist : stripEnergyFoot)
-        if (hist)
-            hist->Write();
-
     for (auto &footVec : posFootMult)
         for (auto &multVec : footVec)
             for (auto *hist : multVec)
                 if (hist)
                     hist->Write();
-
+    for (auto &footVec : chargeEnergyFootAsic)
+        for (auto *hist : footVec)
+            if (hist)
+                hist->Write();
     for (auto &footVec : chargeEnergyFootAsicMult)
         for (auto &asicVec : footVec)
             for (auto *hist : asicVec)
                 if (hist)
                     hist->Write();
-
+    for (auto *hist : stripEnergyFoot)
+        if (hist)
+            hist->Write();
     if (hChargeFull)
         hChargeFull->Write();
 
