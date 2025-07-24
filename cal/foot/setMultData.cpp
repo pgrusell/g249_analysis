@@ -27,8 +27,8 @@
 int main(int argc, char **argv)
 {
     TString inFilePath =
-        "/nucl_lustre/pablogrusell/g249/root_files/etaCorr/g249_data_incoming_online_20250724_095255.root";
-    TString outFilePath = "/nucl_lustre/pablogrusell/g249/root_files/etaCorr/foot_etaplot_mult_v5.root";
+        "/nucl_lustre/pablogrusell/g249/g249_analysis/root_files/etaCorrection/g249_data_incoming_online_20250724_125717.root";
+    TString outFilePath = "/nucl_lustre/pablogrusell/g249/g249_analysis/root_files/etaCorrection/foot_etaplot_mult.root";
 
     if (argc > 1)
         inFilePath = argv[1];
