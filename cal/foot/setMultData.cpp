@@ -38,18 +38,16 @@ int main(int argc, char **argv)
         outFilePath = argv[2];
 
     const int nFoots = 8;
-    const int nAsics = 10;
+    const int nAsics = 5;
     const int maxMult = 4;
     const int nStrips = 640;
-    const std::vector<int> chargesZ = {7, 8, 9, 10};
+    const std::vector<int> chargesZ = {8, 9};
     const int nCharges = chargesZ.size();
 
-    std::map<int, int> zToIndex = {{7, 0}, {8, 1}, {9, 2}, {10, 3}};
+    std::map<int, int> zToIndex = {{8, 0}, {9, 1}};
     std::map<int, std::pair<float, float>> zRanges = {
-        {7, {6.6, 7.2}},
         {8, {7.4, 8.3}},
-        {9, {8.32, 9.2}},
-        {10, {10.2, 11}}};
+        {9, {8.32, 9.2}}};
 
     int nProcessedEvents = 0;
 
@@ -61,12 +59,17 @@ int main(int argc, char **argv)
     if (!evt)
         return 1;
 
-    int nEvents = evt->GetEntries();
+    int nEvents = evt->GetEntries() / 10;
 
     evt->SetBranchStatus("*", 0);
     evt->SetBranchStatus("FootHitData*", 1);
     evt->SetBranchStatus("FootCalData*", 1);
     evt->SetBranchStatus("LosHit*", 1);
+
+    evt->SetCacheSize(100 * 1024 * 1024);
+    evt->AddBranchToCache("FootHitData", true);
+    evt->AddBranchToCache("FootCalData", true);
+    evt->AddBranchToCache("LosHit", true);
 
     auto *footCalDataArray = new TClonesArray("R3BFootCalData");
     auto *footDataArray = new TClonesArray("R3BFootHitData");
@@ -95,32 +98,32 @@ int main(int argc, char **argv)
 
     for (int f = 0; f < nFoots; ++f)
     {
-        posFoot[f] = new TH2F(Form("pos_foot_%d", f), "", 640, 0, 640, 1000, 0, 5000);
-        stripEnergyFoot[f] = new TH2F(Form("strip_vs_energy_foot_%d", f), "", nStrips, 0, nStrips, 1000, 0, 5000);
+        posFoot[f] = new TH2F(Form("pos_foot_%d", f), "", 640, 0, 640, 200, 0, 5000);
+        stripEnergyFoot[f] = new TH2F(Form("strip_vs_energy_foot_%d", f), "", nStrips, 0, nStrips, 200, 0, 5000);
         for (int m = 0; m < maxMult; ++m)
-            posFootMult[f][m][0] = new TH2F(Form("pos_foot_%d_mult_%d", f, m + 1), "", 640, 0, 640, 1000, 0, 5000);
+            posFootMult[f][m][0] = new TH2F(Form("pos_foot_%d_mult_%d", f, m + 1), "", 640, 0, 640, 200, 0, 5000);
         for (int a = 0; a < nAsics; ++a)
         {
-            etaFootAsic[f][a] = new TH2F(Form("eta_foot_%d_asic_%d", f, a), "", 100, 0, 1, 1000, 0, 5000);
-            chargeEnergyFootAsic[f][a] = new TH2F(Form("charge_full_vs_energy_foot_%d_asic_%d", f, a), "", 200, 0, 15, 1000, 0, 5000);
+            etaFootAsic[f][a] = new TH2F(Form("eta_foot_%d_asic_%d", f, a), "", 100, 0, 1, 200, 0, 5000);
+            chargeEnergyFootAsic[f][a] = new TH2F(Form("charge_full_vs_energy_foot_%d_asic_%d", f, a), "", 200, 0, 15, 200, 0, 5000);
             for (int m = 0; m < maxMult; ++m)
             {
-                etaFootAsicMult[f][a][m] = new TH2F(Form("eta_foot_%d_asic_%d_mult_%d", f, a, m + 1), "", 100, 0, 1, 1000, 0, 5000);
-                chargeEnergyFootAsicMult[f][a][m] = new TH2F(Form("charge_full_vs_energy_foot_%d_asic_%d_mult_%d", f, a, m + 1), "", 200, 0, 15, 1000, 0, 5000);
+                etaFootAsicMult[f][a][m] = new TH2F(Form("eta_foot_%d_asic_%d_mult_%d", f, a, m + 1), "", 100, 0, 1, 200, 0, 5000);
+                chargeEnergyFootAsicMult[f][a][m] = new TH2F(Form("charge_full_vs_energy_foot_%d_asic_%d_mult_%d", f, a, m + 1), "", 200, 0, 15, 200, 0, 5000);
                 for (int c = 0; c < nCharges; ++c)
                 {
-                    etaFootAsicMultChar[f][a][m][c] = new TH2F(Form("eta_foot_%d_asic_%d_mult_%d_charge_%d", f, a, m + 1, chargesZ[c]), "", 100, 0, 1, 1000, 0, 5000);
-                    energyFootAsicMultChar[f][a][m][c] = new TH1F(Form("energy_foot_%d_asic_%d_mult_%d_charge_%d", f, a, m + 1, chargesZ[c]), "", 1000, 0, 5000);
+                    etaFootAsicMultChar[f][a][m][c] = new TH2F(Form("eta_foot_%d_asic_%d_mult_%d_charge_%d", f, a, m + 1, chargesZ[c]), "", 100, 0, 1, 200, 0, 5000);
+                    energyFootAsicMultChar[f][a][m][c] = new TH1F(Form("energy_foot_%d_asic_%d_mult_%d_charge_%d", f, a, m + 1, chargesZ[c]), "", 200, 0, 5000);
                     energyVsEventFootAsicMultChar[f][a][m][c] = new TH2F(
                         Form("energy_vs_event_foot_%d_asic_%d_mult_%d_charge_%d", f, a, m + 1, chargesZ[c]),
-                        "Energy vs Event;Event number;Energy [a.u.]", nEvents, 0, nEvents, 1000, 0, 5000);
+                        "Energy vs Event;Event number;Energy [a.u.]", nEvents, 0, nEvents, 200, 0, 5000);
                 }
             }
             for (int c = 0; c < nCharges; ++c)
-                etaFootAsicChar[f][a][c] = new TH2F(Form("eta_foot_%d_asic_%d_char_%d", f, a, chargesZ[c]), "", 100, 0, 1, 1000, 0, 5000);
+                etaFootAsicChar[f][a][c] = new TH2F(Form("eta_foot_%d_asic_%d_char_%d", f, a, chargesZ[c]), "", 100, 0, 1, 200, 0, 5000);
         }
         for (int c = 0; c < nCharges; ++c)
-            posFootChar[f][c] = new TH2F(Form("pos_foot_%d_char_%d", f, chargesZ[c]), "", 640, 0, 640, 1000, 0, 5000);
+            posFootChar[f][c] = new TH2F(Form("pos_foot_%d_char_%d", f, chargesZ[c]), "", 640, 0, 640, 200, 0, 5000);
     }
 
     for (int iEvent = 0; iEvent < nEvents; ++iEvent)
@@ -158,7 +161,8 @@ int main(int argc, char **argv)
             double eta = hitFoot->GetEta();
             double energy = hitFoot->GetEnergy();
             double pos = (hitFoot->GetPos() + 50) * 6.4;
-            int asic = pos / 64;
+            int asic = pos / 64 - 3;
+
             int mult = hitFoot->GetMulStrip();
 
             if (foot < 0 || foot >= nFoots || asic < 0 || asic >= nAsics || mult < 1 || mult > maxMult)
