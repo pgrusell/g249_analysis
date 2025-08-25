@@ -27,10 +27,20 @@
 #include <vector>
 #include <map>
 
+inline bool is_bad_position(double pos)
+{
+
+    for (int i = 0; i <= 10; i++)
+        if ((pos >= i * 64 - 1) && (pos <= i * 64 + 1))
+            return true;
+
+    return false;
+}
+
 int main(int argc, char **argv)
 {
     TString inFilePath = "/nucl_lustre/pablogrusell/g249/g249_analysis/root_files/etaCorrection/g249_data_incoming_online_20250728_183008.root";
-    TString outFilePath = "/nucl_lustre/pablogrusell/g249/g249_analysis/root_files/etaCorrection/foot_etaplot_mult2.root";
+    TString outFilePath = "/nucl_lustre/pablogrusell/g249/g249_analysis/root_files/etaCorrection/foot_etaplot_mult3.root";
 
     if (argc > 1)
         inFilePath = argv[1];
@@ -162,7 +172,10 @@ int main(int argc, char **argv)
             double energy = hitFoot->GetEnergy();
             double footCharge = hitFoot->GetZCharge();
             double pos = (hitFoot->GetPos() + 50) * 6.4;
-            int asic = pos / 64 - 3;
+            int asic = pos / 64 - 3; // This -3 is to only consider 5 asics -> needs to be redone!!
+
+            if (is_bad_position(pos))
+                continue;
 
             int mult = hitFoot->GetMulStrip();
 
