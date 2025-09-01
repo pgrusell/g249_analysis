@@ -1,4 +1,7 @@
 *[!./]/
 *results/*
 *data/*
+
+# Deprecated
+*root_files/*
 *.vscode
