@@ -1,0 +1,50 @@
+name: Build LaTeX
+
+permissions:
+  contents: write
+
+on:
+  push:
+    paths:
+      - "doc/**"
+      - "**.sty"
+      - "**.cls"
+      - "Makefile"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show commit and tail of report.tex
+        run: |
+          git rev-parse HEAD
+          tail -n 40 doc/report.tex
+          grep -n "test2" doc/report.tex || true
+
+      - name: Clean previous PDF and aux
+        run: rm -f doc/report.pdf doc/*.{aux,fls,fdb_latexmk,log,out,toc,synctex.gz} || true
+
+      - name: Compile LaTeX (force rebuild)
+        uses: xu-cheng/latex-action@v3
+        with:
+          root_file: doc/report.tex
+          work_in_root_file_dir: true
+          args: -g -pdf   # fuerza recompilación aunque crea que está todo al día
+
+      - name: List doc/
+        run: ls -lh doc
+
+      - name: Upload PDF (artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-pdf
+          path: doc/report.pdf
+
+      - name: Commit updated PDF (in doc/)
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(report): update compiled PDF [skip ci]"
+          file_pattern: doc/report.pdf
