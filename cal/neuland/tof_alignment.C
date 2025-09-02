@@ -1,27 +1,15 @@
-#include <ROOT/RDataFrame.hxx>
-#include <ROOT/RVec.hxx>
-#include <TH2D.h>
 #include <TFile.h>
+#include <TChain.h>
+#include <TTreeReader.h>
+#include <TTreeReaderArray.h>
+#include <TH2D.h>
 #include <TSystem.h>
 #include <TString.h>
 #include <TVector3.h>
 #include <vector>
+#include <string>
 #include <iostream>
-
-using ROOT::VecOps::RVec;
-
-// Function to act on every event and hit
-RVec<double> ToFCorr(const RVec<double> &t, const RVec<TVector3> &pos)
-{
-    const double Lref = 1557.0;
-    const double c = 29.979;
-    const size_t n = std::min(t.size(), pos.size());
-    RVec<double> out;
-    out.reserve(n);
-    for (size_t i = 0; i < n; ++i)
-        out.push_back(t[i] - (pos[i].Mag() - Lref) / c);
-    return out;
-}
+#include <limits>
 
 void tof_alignment(
     TString absPath = "",
@@ -31,7 +19,7 @@ void tof_alignment(
         "g249_all_det_offline_20250828_210751_2.root"},
     TString fileOutName = "tof_alignment_losNeuland.root")
 {
-    // Base path
+    // Paths
     TString repopath = gSystem->Getenv("repopath");
     if (absPath.IsNull() || absPath == "")
         absPath = repopath + "/data";
@@ -41,36 +29,66 @@ void tof_alignment(
         absPath = ".";
     }
 
-    // Files
-    TString inDir = absPath;
-    std::vector<std::string> files;
-    files.reserve(inFiles.size());
+    // Chain all files
+    TChain chain("evt");
     for (const auto &f : inFiles)
-        files.emplace_back((inDir + '/' + f).Data());
+    {
+        TString full = absPath + "/" + f;
+        if (gSystem->AccessPathName(full))
+        {
+            std::cerr << "[WARN] no encuentro: " << full << "\n";
+            continue;
+        }
+        chain.Add(full);
+    }
+    if (chain.GetEntries() == 0)
+    {
+        std::cerr << "[ERROR] La cadena 'evt' está vacía.\n";
+        return;
+    }
 
-    // RDF
-    ROOT::EnableImplicitMT();
-    ROOT::RDataFrame df("evt", files);
+    // Reader
+    TTreeReader reader(&chain);
 
-    // One point per neuland hit
-    auto df2 = df
-                   .Define("nHitsNeu", "static_cast<int>(NeulandHits.GetEntriesFast())")
-                   .Define("nHitsLos", "static_cast<int>(LosHit.GetEntriesFast())")
-                   .Filter("nHitsNeu > 0 && nHitsLos == 1")
-                   .Define("paddle", "NeulandHits.fPaddle")
-                   .Define("tof", ToFCorr, {"NeulandHits.fT", "NeulandHits.fPosition"});
+    // NEULAND
+    TTreeReaderArray<int> neuPaddle(reader, "NeulandHits.fPaddle");
+    TTreeReaderArray<double> neuT(reader, "NeulandHits.fT");            // ns
+    TTreeReaderArray<TVector3> neuPos(reader, "NeulandHits.fPosition"); // cm
 
-    // Histo
-    auto hTofVsPaddles = df2.Histo2D(
-        {"hTofVsPaddles", "ToF vs Paddle;Paddle;ToF (ns)",
-         1300, 0.0, 1300.0,
-         1000, 46.0, 55.0},
-        "paddle", "tof");
+    // LOS
+    TTreeReaderArray<double> losZ(reader, "LosHit.fZ"); // double
 
-    // save
+    const double Lref = 1557.0; // cm
+    const double c = 29.979;    // cm/ns
+
+    TH2D hTofVsPaddles("hTofVsPaddles", "ToF vs Paddle;Paddle;ToF (ns)",
+                       1300, 0.0, 1300.0,
+                       1000, 46.0, 55.0);
+
+    Long64_t iev = 0;
+    while (reader.Next())
+    {
+        if ((iev++ % 100000) == 0)
+            std::cout << iev << '\n';
+
+        if (losZ.GetSize() != 1)
+            continue;
+        int nNeu = std::min({neuPaddle.GetSize(), neuT.GetSize(), neuPos.GetSize()});
+        if (nNeu <= 0)
+            continue;
+
+        for (int i = 0; i < nNeu; ++i)
+        {
+            const double tof_corr = neuT[i] - (neuPos[i].Mag() - Lref) / c;
+            hTofVsPaddles.Fill(neuPaddle[i], tof_corr);
+        }
+    }
+
+    // Save
     TString outDir = repopath + "/results/cal";
-    TFile out(outDir + "/" + fileOutName, "RECREATE");
-    hTofVsPaddles->Write();
-    out.Close();
-    std::cout << "[OK] Escrito: " << (outDir + "/" + fileOutName) << "\n";
+    gSystem->mkdir(outDir, kTRUE);
+
+    TFile fout(outDir + "/" + fileOutName, "RECREATE");
+    hTofVsPaddles.Write();
+    fout.Close();
 }
