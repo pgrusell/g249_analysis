@@ -5,11 +5,20 @@ permissions:
 
 on:
   push:
+    branches: [dev]
     paths:
       - "doc/**"
       - "**.sty"
       - "**.cls"
       - "Makefile"
+  pull_request:
+    branches: [dev]
+    paths:
+      - "doc/**"
+      - "**.sty"
+      - "**.cls"
+      - "Makefile"
+  workflow_dispatch: {} 
 
 jobs:
   build:
