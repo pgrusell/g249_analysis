@@ -13,24 +13,14 @@ void check_eta_correction(TString inFile = "g249_data_incoming_online_20250728_1
 
     // Open file
     TFile *fin = TFile::Open(repopath + "/data/" + inFile);
-    if (!fin || fin->IsZombie())
-    {
-        Error("check_eta_correction", "No pude abrir el fichero %s", inFile.Data());
-        return;
-    }
-
     TTree *tree = (TTree *)fin->Get("evt");
-    if (!tree)
-    {
-        Error("check_eta_correction", "No existe el TTree 'evt'.");
-        return;
-    }
 
     // Read branches
     TTreeReader reader(tree);
     TTreeReaderArray<UChar_t> fDetId(reader, "FootHitData.fDetId");
     TTreeReaderArray<UShort_t> fMulStrip(reader, "FootHitData.fMulStrip");
     TTreeReaderArray<double> fZCharge(reader, "FootHitData.fZCharge");
+    TTreeReaderArray<double> fEta(reader, "FootHitData.fEta");
     TTreeReaderArray<double> losZ(reader, "LosHit.fZ");
 
     // Histograms
@@ -39,12 +29,17 @@ void check_eta_correction(TString inFile = "g249_data_incoming_online_20250728_1
     const int nby = 600;
     const double ymin = 5., ymax = 14.;
 
-    std::vector<TH2D *> hists;
+    std::vector<TH2D *> chargeFootVsLos;
+    std::vector<TH2D *> energyVsEta;
     for (int det = 1; det <= 8; det++)
     {
-        hists.push_back(new TH2D(Form("h2_FootVsLos_z_det%d", det),
-                                 Form("Det %d;Z_{FOOT};Z_{LOS}", det),
-                                 nbx, xmin, xmax, nby, ymin, ymax));
+        chargeFootVsLos.push_back(new TH2D(Form("h2_FootVsLos_z_det%d", det),
+                                           Form("Det %d;Z_{FOOT};Z_{LOS}", det),
+                                           nbx, xmin, xmax, nby, ymin, ymax));
+
+        energyVsEta.push_back(new TH2D(Form("h2_EnergyVsEta_det%d", det),
+                                       Form("Det %d;#eta;Z_{FOOT}", det),
+                                       nbx, 0, 1, nbx, xmin, xmax));
     }
 
     // event loop
@@ -60,14 +55,19 @@ void check_eta_correction(TString inFile = "g249_data_incoming_online_20250728_1
             {
                 int det = fDetId[i];
                 if (det >= 1 && det <= 8)
-                    hists[det - 1]->Fill(fZCharge[i], zLos);
+                {
+                    chargeFootVsLos[det - 1]->Fill(fZCharge[i], zLos);
+                    energyVsEta[det - 1]->Fill(fEta[i], fZCharge[i]);
+                }
             }
         }
     }
 
     // save
     TFile out(repopath + "/results/cal/chargeId_perDet.root", "RECREATE");
-    for (auto h : hists)
+    for (auto h : chargeFootVsLos)
+        h->Write();
+    for (auto h : energyVsEta)
         h->Write();
     out.Close();
 
