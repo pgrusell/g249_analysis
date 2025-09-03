@@ -1,6 +1,6 @@
 *results/*
 *data/*
 
-# Deprecated
-*root_files/*
+*root_files/* # old
 *.vscode
+*.DS_Store
