@@ -1,7 +1,5 @@
 #include "ISimGenerator.h"
 
-#include <FairPrimaryGenerator.h>
-#include <R3BAsciiGenerator.h>
 #include <TSystem.h>
 #include <FairLogger.h>
 #include <string>

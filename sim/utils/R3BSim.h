@@ -1,17 +1,17 @@
 #pragma once
 #include "ISimGeometry.h"
 #include "ISimGenerator.h"
-#include <FairRunSim.h>
-#include <FairParRootFileIo.h>
-#include <FairRuntimeDb.h>
 #include <TStopwatch.h>
 #include <TRandom3.h>
 #include <TVirtualMC.h>
-#include <FairLogger.h>
 #include <TSystem.h>
 #include <memory>
 #include <string>
 #include <optional>
+
+class FairRunSim;
+class FairParRootFileIo;
+class FairRuntimeDb;
 
 class R3BSim
 {
@@ -30,7 +30,8 @@ public:
         std::string logScreen = "INFO";
     };
 
-    explicit R3BSim(Options opts = {}) : fOpts(std::move(opts)) {}
+    R3BSim() : fOpts() {}
+    explicit R3BSim(Options opts) : fOpts(std::move(opts)) {}
 
     R3BSim &withGeometry(std::unique_ptr<ISimGeometry> geo)
     {
@@ -83,13 +84,6 @@ public:
         run->SetName(fOpts.transport.c_str());
         run->SetOutputFile(fOpts.outFile.c_str());
         auto *rtdb = run->GetRuntimeDb();
-
-        // Use special physics if needed
-        if ((fOpts.userPList) && (fOpts.transport.c_str().CompareTo("TGeant4") == 0))
-        {
-            run->SetUserConfig("g4R3bConfig.C");
-            run->SetUserCuts("SetCuts.C");
-        }
 
         run->SetMaterials(fOpts.materials.c_str());
 

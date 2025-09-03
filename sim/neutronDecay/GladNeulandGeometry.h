@@ -1,14 +1,5 @@
 #pragma once
 #include "ISimGeometry.h"
-
-#include <FairRunSim.h>
-#include <R3BCave.h>
-#include <R3BGladMagnet.h>
-#include <R3BGladFieldMap.h>
-#include <R3BFieldPar.h>
-#include <R3BNeuland.h>
-
-#include <FairRuntimeDb.h>
 #include <TVector3.h>
 #include <string>
 
@@ -21,13 +12,14 @@ public:
         std::string gladGeoFile = "glad_v2025.1.geo.root";
 
         int neulandPlanes = 13;
-        TVector3 neulandPos = {0., 0., 1650.}; // mm
+        TGeoTranslation neulandPos = {0., 0., 1650.}; // mm
 
         // Magnetic field
         double fieldScale = -0.82;
     };
 
-    explicit GladNeulandGeometry(Options opt = {}) : fOpt(std::move(opt)) {}
+    GladNeulandGeometry() : fOpt() {}
+    explicit GladNeulandGeometry(Options opt) : fOpt(std::move(opt)) {}
 
     void configure(FairRunSim &run, const SimPaths &) override
     {
@@ -47,7 +39,7 @@ public:
         magField->SetScale(fOpt.fieldScale);
         run.SetField(magField);
 
-        // Empaqueta parámetros del campo en la runtime DB (igual que macro)
+        // save parameters
         auto *rtdb = run.GetRuntimeDb();
         auto *fieldPar = (R3BFieldPar *)rtdb->getContainer("R3BFieldPar");
         if (fieldPar)

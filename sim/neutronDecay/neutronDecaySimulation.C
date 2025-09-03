@@ -1,3 +1,8 @@
+// Cling configuration
+#pragma cling add_include_path("../utils")
+#pragma cling add_include_path("neutronDecay")
+#pragma cling add_include_path(".")
+
 #include "../utils/R3BSim.h"
 #include "GladNeulandGeometry.h"
 #include "../utils/AsciiFileGenerator.h"
@@ -13,7 +18,7 @@ void neutronDecaySimulation(Int_t nEvents = 10000,
     gopt.caveGeoFile = "r3b_cave_vacuum.geo";
     gopt.gladGeoFile = "glad_v2025.1.geo.root";
     gopt.neulandPlanes = 13;
-    gopt.neulandPos = TVector3(0., 0., 1650.);
+    gopt.neulandPos = TGeoTranslation(0., 0., 1650.);
     gopt.fieldScale = -0.82;
 
     R3BSim::Options sopt;
