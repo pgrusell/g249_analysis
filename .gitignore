@@ -1,6 +1,6 @@
 *results/*
 *data/*
 
-*root_files/* # old
+*root_files/* 
 *.vscode
 *.DS_Store
