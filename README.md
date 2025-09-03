@@ -19,10 +19,10 @@ root -l macro.C
 ## Structure
 
 - doc: Information about the code, analysis, physics and usage.
-- cal: Macros to test the calibrations of different detectors (currently only for eta correction on FOOTs).
+- cal: Macros to test the calibrations of different detectors. 
 
 _Under development:_
 
 - sim: Simulation of the experiment.
-- track: Reconstruction algorithms, trained with simulated data, to retrieve vertex, B$\rho$, A/Q and other physical variables for particle ID.
+- track: Reconstruction algorithms, trained with simulated data, to retrieve vertex, B$\rho$ A/Q and other physical variables for particle ID.
 - final: Macros to obtain the physical observables from the data.
