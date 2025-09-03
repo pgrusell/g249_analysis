@@ -6,3 +6,4 @@
 *.DS_Store
 *core_dump_*
 *.root*
+*.out*
