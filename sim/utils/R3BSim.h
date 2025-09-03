@@ -22,9 +22,10 @@ public:
         std::string outFile = "./sim.root";
         std::string parFile = "./par.root";
         std::string materials = "media_r3b.geo";
-        int randomSeed = 0;     // 0 -> time-based
-        int maxNSteps = -15000; // e.g. for CALO
+        int randomSeed = 0;
+        int maxNSteps = -15000;
         bool storeTraj = false;
+        bool userPList = false;
         std::string logVerbosity = "LOW"; // FairLogger
         std::string logScreen = "INFO";
     };
@@ -42,7 +43,6 @@ public:
         return *this;
     }
 
-    // Helpers para paths/env que luego usan las estrategias:
     SimPaths resolvePaths() const
     {
         SimPaths p;
@@ -63,14 +63,15 @@ public:
         }
 
         auto paths = resolvePaths();
-        // Normaliza dobles barras
+
+        // Normalize double bars to bars (/u//land -> /u/land)
         auto norm = [](std::string &s)
         { for (size_t i=1;i<s.size();++i) if(s[i]=='/' && s[i-1]=='/') s.erase(i--,1); };
         norm(paths.pardir);
         norm(paths.geomdir);
         norm(paths.configdir);
 
-        // Export env para R3BRoot
+        // Export env for R3BRoot
         gSystem->Setenv("GEOMPATH", paths.geomdir.c_str());
         gSystem->Setenv("CONFIG_DIR", paths.configdir.c_str());
 
@@ -83,25 +84,32 @@ public:
         run->SetOutputFile(fOpts.outFile.c_str());
         auto *rtdb = run->GetRuntimeDb();
 
+        // Use special physics if needed
+        if ((fOpts.userPList) && (fOpts.transport.c_str().CompareTo("TGeant4") == 0))
+        {
+            run->SetUserConfig("g4R3bConfig.C");
+            run->SetUserCuts("SetCuts.C");
+        }
+
         run->SetMaterials(fOpts.materials.c_str());
 
         // Logging
         FairLogger::GetLogger()->SetLogVerbosityLevel(fOpts.logVerbosity.c_str());
         FairLogger::GetLogger()->SetLogScreenLevel(fOpts.logScreen.c_str());
 
-        // Geometría (estrategia)
+        // Geometry
         fGeo->configure(*run, paths);
 
-        // Generador (estrategia)
+        // Generator
         run->SetGenerator(fGen->build());
         run->SetStoreTraj(fOpts.storeTraj);
 
-        // Init + RNG + steps
+        // Init
         run->Init();
         TVirtualMC::GetMC()->SetRandom(new TRandom3(fOpts.randomSeed));
         TVirtualMC::GetMC()->SetMaxNStep(fOpts.maxNSteps);
 
-        // Parámetros
+        // Save params
         Bool_t kMerged = kTRUE;
         auto *parOut = new FairParRootFileIo(kMerged);
         parOut->open(fOpts.parFile.c_str());
@@ -109,7 +117,7 @@ public:
         rtdb->saveOutput();
         rtdb->print();
 
-        // Ejecuta
+        // Run
         if (nEvents > 0)
         {
             run->Run(nEvents);
