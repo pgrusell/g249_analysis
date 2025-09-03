@@ -38,12 +38,54 @@
 \end{center}
 \noindent\rule{\linewidth}{0.6pt}
 
-~
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/g249_setup.png}
+\end{figure}
 
 This document is a brief description of the different task performed in the analysis of the G249 experiment. In particular we focus on the work done by the macros of the GitHub repository \href{https://github.com/pgrusell/g249_analysis}{g249\_analysis}.
 
 \section{Calibrations}
 
-These macros check the performance of the calibrations of some detectors (FOOTs and Neuland for the moment).
+These macros check the performance of the calibrations of some detectors (FOOTs and NeuLAND for the moment).
+
+\subsection{FOOT}
+
+For FOOTs, all the calibrations were done in-flight by R3BROOT (in map2cal and cal2hit classes), so the only correction done after the experiment was charge calibration. The problem is that there is a dependence on the energy with the eta parameter that does not allow to perform a direct conversion between energy and charge (see \cref{fig:cal_foot_eta} left).
+
+\begin{figure}[h]
+    \centering
+    % No eta correction
+    \begin{subfigure}{0.45\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/cal_foot_no_etaCorr.png}
+    \end{subfigure}
+    \hfill
+    % eta correction
+    \begin{subfigure}{0.45\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/cal_foot_etaCorr.png}
+    \end{subfigure}
+
+    \caption{Energy as a function of the eta parameter. Left: With eta correction or charge calibration, only one ASIC. Right: After eta correction and charge calibration for all the ASICs of the detector.}
+    \label{fig:cal_foot_eta}
+\end{figure}
+
+To make the eta correction we perform a high-degree polynomial fit to the $Z=8$ and $Z=9$ bands for each ASIC chip and calibrate the energy by making a linear fit (channels, charge) for those bands. This work is done by R3BROOT and, in the macro \texttt{check\_eta\_correction.C}, we plot the charge as a function of eta to show that the former dependence has disappear (see \cref{fig:cal_foot_eta} right).
+
+On the other hand, this macro also represent the charge measured in the FOOTs (after all the corrections) against the charge measured in LOS. In \cref{fig:cal_foot_ZLosVsFOOT}, we see a clear correlation between both charges. Whereas for charges different from $Z=8$ and $Z=9$ we see some saturation, this is not present for our charges of interest.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/cal_foot_ZLosVsFOOT.png}
+    \caption{Charge in FOOT vs charge in LOS for the same events}
+    \label{fig:cal_foot_ZLosVsFOOT}
+\end{figure}
+
+
+
+\subsection{NeuLAND}
+
+
 
 \end{document}
