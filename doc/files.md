@@ -12,4 +12,6 @@
 | Name                                                   |  Description                                                   |
 | ------------------------------------------------------ |  ------------------------------------------------------------- |
 | cal/chargeId_perDet.root     | Eta vs Eenergy plot and charge correlation with LOS after eta correction applied      | 
-| cal/tof_alignment_losNeuland_v2.root | ToF vs paddle number with v2 of hit parameters (WRONG)                                      |
+| cal/tof_alignment_losNeuland_v2.root | ToF vs paddle number with v2 of hit parameters (WRONG)|
+| cal/tof_alignment_losNeuland_LOS.root | ToF vs paddle number with v2 of hit parameters without LOS trigger|
+| cal/tof_alignment_losNeuland_v1.root | ToF vs paddle number with v1 of hit parameters (WRONG)|
