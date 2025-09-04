@@ -4,3 +4,6 @@
 *root_files/* 
 *.vscode
 *.DS_Store
+*core_dump_*
+*.root*
+*.out*
