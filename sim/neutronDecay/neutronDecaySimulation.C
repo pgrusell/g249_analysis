@@ -7,8 +7,8 @@
 #include "GladNeulandGeometry.h"
 #include "../utils/AsciiFileGenerator.h"
 
-void neutronDecaySimulation(Int_t nEvents = 10000,
-                            TString asciiFile = "gen_test.out")
+void neutronDecaySimulation(Int_t nEvents = 1000,
+                            TString asciiFile = "O24_1n.out")
 {
 
     // paths
@@ -23,10 +23,10 @@ void neutronDecaySimulation(Int_t nEvents = 10000,
 
     R3BSim::Options sopt;
     sopt.transport = "TGeant4";
-    sopt.outFile = (repopath + "/results/sim/" + "/sim_neutronDecay.root").Data();
-    sopt.parFile = (repopath + "/results/sim/" + "/par_neutronDecay.root").Data();
+    sopt.outFile = (repopath + "/results/sim" + "/sim_neutronDecay.root").Data();
+    sopt.parFile = (repopath + "/results/sim" + "/par_neutronDecay.root").Data();
     sopt.materials = "media_r3b.geo";
-    sopt.storeTraj = kFALSE;
+    sopt.storeTraj = kTRUE;
     sopt.maxNSteps = -15000;
     sopt.userPList = false;
 
