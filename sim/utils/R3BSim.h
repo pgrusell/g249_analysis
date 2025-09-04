@@ -24,7 +24,7 @@ public:
         std::string materials = "media_r3b.geo";
         int randomSeed = 0;
         int maxNSteps = -15000;
-        bool storeTraj = false;
+        bool storeTraj = true;
         bool userPList = false;
         std::string logVerbosity = "LOW"; // FairLogger
         std::string logScreen = "INFO";
