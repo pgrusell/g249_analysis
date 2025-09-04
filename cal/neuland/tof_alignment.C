@@ -36,14 +36,14 @@ void tof_alignment(
         TString full = absPath + "/" + f;
         if (gSystem->AccessPathName(full))
         {
-            std::cerr << "[WARN] no encuentro: " << full << "\n";
+            std::cerr << "[WARN] not found: " << full << "\n";
             continue;
         }
         chain.Add(full);
     }
     if (chain.GetEntries() == 0)
     {
-        std::cerr << "[ERROR] La cadena 'evt' está vacía.\n";
+        std::cerr << "[ERROR] evt is empty.\n";
         return;
     }
 
