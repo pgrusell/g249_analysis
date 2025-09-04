@@ -25,7 +25,7 @@ void tof_alignment(
         absPath = repopath + "/data";
     if (absPath.IsNull() || absPath == "")
     {
-        std::cerr << "[WARN] $repopath no definido, uso '.'\n";
+        std::cerr << "[WARN] $repopath not defined, uso '.'\n";
         absPath = ".";
     }
 
