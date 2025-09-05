@@ -1,32 +1,31 @@
-#include <TFile.h>
-#include <TChain.h>
-#include <TTreeReader.h>
-#include <TTreeReaderArray.h>
-#include <TH2D.h>
-#include <TSystem.h>
-#include <TString.h>
-#include <TVector3.h>
-#include <vector>
-#include <string>
-#include <iostream>
-#include <limits>
-
-void tof_alignment(
+void check_tof_alignment_cal(
     TString absPath = "",
     std::vector<TString> inFiles = {
         "g249_all_det_offline_20250828_210751.root",
         "g249_all_det_offline_20250828_210751_1.root",
         "g249_all_det_offline_20250828_210751_2.root"},
-    TString fileOutName = "tof_alignment_losNeuland.root")
+    TString fileOutName = "tof_alignment_losNeuland.root", TString calFile = "tfine_run112to117_2.txt")
 {
     // Paths
     TString repopath = gSystem->Getenv("repopath");
     if (absPath.IsNull() || absPath == "")
-        absPath = repopath + "/data";
+        absPath = repopath + "/data/";
     if (absPath.IsNull() || absPath == "")
     {
         std::cerr << "[WARN] $repopath not defined, using '.'\n";
         absPath = ".";
+    }
+
+    // Open cal file and store the pedestals
+    int iPaddle;
+    double iPedestal;
+    std::vector<double> pedestals(1300);
+
+    std::ifstream fin(repopath + "/data/" + calFile);
+    while (fin >> iPaddle >> iPedestal)
+    {
+        std::cout << iPaddle << " " << iPedestal << "\n";
+        pedestals[iPaddle - 1] = iPedestal;
     }
 
     // Chain all files
@@ -80,7 +79,8 @@ void tof_alignment(
         for (int i = 0; i < nNeu; ++i)
         {
             const double tof_corr = neuT[i] - (neuPos[i].Mag() - Lref) / c;
-            hTofVsPaddles.Fill(neuPaddle[i], tof_corr);
+            const double tof_diff = 51.98 - pedestals[neuPaddle[i] - 1];
+            hTofVsPaddles.Fill(neuPaddle[i], tof_corr + tof_diff);
         }
     }
 
