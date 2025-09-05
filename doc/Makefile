@@ -1,15 +1,22 @@
 TARGET := report
+ENGINE ?= pdf        
+BIB    ?= bibtex     
+
 TEXSRC := $(TARGET).tex
 
-all: pdf
+LATEXMK_BIBFLAG := $(if $(filter $(BIB),biber),-use-biber,-bibtex)
 
-pdf: $(TARGET).pdf
+.PHONY: all clean distclean
+
+all: $(TARGET).pdf
 
 $(TARGET).pdf: $(TEXSRC)
-	pdflatex -interaction=nonstopmode -halt-on-error $(TEXSRC)
+	latexmk -$(ENGINE) -interaction=nonstopmode -halt-on-error \
+		-file-line-error -synctex=1 $(LATEXMK_BIBFLAG) $(TEXSRC)
 
 clean:
-	rm -f *.aux *.log *.bbl *.blg *.toc *.out *.synctex.gz *.fls *.fdb_latexmk
+	latexmk -C
+	rm -f *.bbl *.blg
 
 distclean: clean
 	rm -f $(TARGET).pdf

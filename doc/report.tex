@@ -88,4 +88,17 @@ On the other hand, this macro also represent the charge measured in the FOOTs (a
 
 \section{Simulation}
 
+\subsection{Neutron emission decay}
+
+Here we simulate the decay of the \textsuperscript{24}O, produced in (p,2p) reaction, by neutron emission. The idea is to use the generator \href{https://github.com/pgrusell/R3BNeutronDecayGenerator}{\texttt{R3BNeutronGenerator}}. There, we will input the mass and charge of the incoming fragment, $A = 24$ and $Z=8$, for \textsuperscript{24}O, the kinetic energy per nucleon in the lab frame of the fragment, $\sim 650$ MeV \footnotemark, the number of emitted neutrons and the energy and width of the resonance that we want to simulate.
+
+% Footnote
+\footnotetext{{This is the energy of the \textsuperscript{25}F fragment, in the this approximation we neglect the energy lost by this nucleus in all the materials before the target, and also consider (p,2p) reaction as a quasi elastic reaction, conserving the energy per nucleon.}}
+
+The first idea is to reproduce the same resonance measured in \cite{Hoffman2009_O24},
+
+\bibliographystyle{plain}
+\bibliography{bibliography}
+
+
 \end{document}
