@@ -34,6 +34,12 @@ public:
         // --- NeuLAND ---
         run.AddModule(new R3BNeuland(fOpt.neulandPlanes, fOpt.neulandPos));
 
+        // run.AddTask(
+        // new R3BNeulandDigitizer(R3BNeulandDigitizer::Options::neulandTamex));
+        // run.AddTask(new R3BNeulandClusterFinder());
+        // run.AddTask(new R3BNeulandPrimaryInteractionFinder());
+        // run.AddTask(new R3BNeulandPrimaryClusterFinder());
+
         // --- GLAD field map ---
         auto *magField = new R3BGladFieldMap("R3BGladMap");
         magField->SetScale(fOpt.fieldScale);
