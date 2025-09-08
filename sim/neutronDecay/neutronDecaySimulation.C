@@ -8,7 +8,7 @@
 #include "../utils/AsciiFileGenerator.h"
 
 void neutronDecaySimulation(Int_t nEvents = 1000,
-                            TString asciiFile = "O24_1n.out")
+                            TString asciiFile = "O24_2n_res1.out")
 {
 
     // paths
@@ -23,8 +23,8 @@ void neutronDecaySimulation(Int_t nEvents = 1000,
 
     R3BSim::Options sopt;
     sopt.transport = "TGeant4";
-    sopt.outFile = (repopath + "/results/sim" + "/sim_neutronDecay.root").Data();
-    sopt.parFile = (repopath + "/results/sim" + "/par_neutronDecay.root").Data();
+    sopt.outFile = (repopath + "/results/sim" + "/sim_2ndecay_2res.root").Data();
+    sopt.parFile = (repopath + "/results/sim" + "/par_2ndecay_2res.root").Data();
     sopt.materials = "media_r3b.geo";
     sopt.storeTraj = kTRUE;
     sopt.maxNSteps = -15000;
