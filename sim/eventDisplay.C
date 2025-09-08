@@ -2,7 +2,7 @@ void eventDisplay()
 {
   FairRunAna *fRun = new FairRunAna();
   fRun->SetSource(new FairFileSource("/nucl_lustre/pablogrusell/g249/g249_analysis/results/sim/sim_neutronDecay.root"));
-  fRun->SetSink(new FairRootFileSink("/nucl_lustre/pablogrusell/g249/g249_analysis/results/sim/par_neutronDecay.root"));
+  fRun->SetSink(new FairRootFileSink("/nucl_lustre/pablogrusell/g249/g249_analysis/results/sim/vis_neutronDecay.root"));
 
   FairRuntimeDb *rtdb = fRun->GetRuntimeDb();
   FairParRootFileIo *parIo1 = new FairParRootFileIo();
