@@ -1,7 +1,7 @@
 \documentclass[12pt,a4paper]{article}
 \usepackage[utf8]{inputenc}
 \RequirePackage{fix-cm}
-\usepackage[spanish]{babel}
+\usepackage[english]{babel}
 \usepackage{amsmath}
 \usepackage{amsfonts}
 \usepackage{amssymb, cancel}
@@ -26,6 +26,24 @@
 \usepackage{parskip}
 \usepackage{hyperref}
 \usepackage{cleveref}
+
+% Code styles
+\lstdefinestyle{bash}{
+  language=bash,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{green!50!black},
+  stringstyle=\color{red!60!black},
+  commentstyle=\color{gray},
+  showstringspaces=false,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{black!30},
+  backgroundcolor=\color{black!5},
+  xleftmargin=1em,
+  xrightmargin=1em,
+}
+
+\newcommand{\bashline}[1]{\lstinline[style=bash]!#1!}
 
 \begin{document}
 
@@ -90,15 +108,154 @@ On the other hand, this macro also represent the charge measured in the FOOTs (a
 
 \subsection{Neutron emission decay}
 
-Here we simulate the decay of the \textsuperscript{24}O, produced in (p,2p) reaction, by neutron emission. The idea is to use the generator \href{https://github.com/pgrusell/R3BNeutronDecayGenerator}{\texttt{R3BNeutronGenerator}}. There, we will input the mass and charge of the incoming fragment, $A = 24$ and $Z=8$, for \textsuperscript{24}O, the kinetic energy per nucleon in the lab frame of the fragment, $\sim 650$ MeV \footnotemark, the number of emitted neutrons and the energy and width of the resonance that we want to simulate.
+Here we simulate the decay of the \textsuperscript{24}O, produced in (p,2p) reaction, by neutron emission. The idea is to use the generator \href{https://github.com/pgrusell/R3BNeutronDecayGenerator}{\texttt{R3BNeutronGenerator}}. There, we will input the mass and charge of the fragment produced in the de-excitation via neutron emission of the incoming fragment, the kinetic energy per nucleon in the lab frame of the fragment, $\sim 650$ MeV, the number of emitted neutrons and the energy and width of the resonance that we want to simulate.
 
-% Footnote
-\footnotetext{{This is the energy of the \textsuperscript{25}F fragment, in the this approximation we neglect the energy lost by this nucleus in all the materials before the target, and also consider (p,2p) reaction as a quasi elastic reaction, conserving the energy per nucleon.}}
+\begin{figure}[htbp]
+    \centering
+    \begin{minipage}[c]{0.55\textwidth}
+        The first idea is to reproduce the same $E_{\text{rel}}$ spectra as measured in \cite{Hoffman2009_O24}.
+        There, \textsuperscript{24}O excited states were populated via knock-out reactions from a primary beam of
+        \textsuperscript{26}F and they measured, in coincidence, one neutron and the outgoing \textsuperscript{22}O.
+        The result of reconstructing the $E_{\text{rel}}$ spectra (see \cref{fig:sim_nndecay_rel_energy}), shows to peaks corresponding to the transitions shown in \cref{fig:sim_nndecay_levels}. Although in our experiment we would expect more peaks, since the energy of our beam is higher, we would try to simulate the same spectra.
+    \end{minipage}\hfill
+    \begin{minipage}[c]{0.4\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/sim_nndecay_erel_exp.png}
+        \caption{$E_{\text{rel}}$ spectrum from \cite{Hoffman2009_O24}.}
+        \label{fig:sim_nndecay_rel_energy}
+    \end{minipage}
+\end{figure}
 
-The first idea is to reproduce the same resonance measured in \cite{Hoffman2009_O24},
+\begin{figure}[H]
+    \centering
+
+
+    \tikzset{every picture/.style={line width=0.75pt}} %set default line width to 0.75pt        
+
+    \begin{tikzpicture}[x=0.75pt,y=0.75pt,yscale=-1,xscale=1]
+        %uncomment if require: \path (0,444); %set diagram left start at 0, and has height of 444
+
+        %Straight Lines [id:da47211974419342806] 
+        \draw    (420.5,390.5) -- (521,391) ;
+        %Straight Lines [id:da10038562568838238] 
+        \draw    (278,290.5) -- (378.5,291) ;
+        %Straight Lines [id:da5043765159062721] 
+        \draw    (135,195) -- (235.5,195.5) ;
+        %Straight Lines [id:da04455586204523854] 
+        \draw  [dash pattern={on 0.84pt off 2.51pt}]  (467,329.5) -- (467,365) ;
+        %Straight Lines [id:da6963431616690452] 
+        \draw  [dash pattern={on 4.5pt off 4.5pt}]  (420.5,290) -- (521,290.5) ;
+        %Straight Lines [id:da1580999328594327] 
+        \draw    (420.5,240.5) -- (521,241) ;
+        %Straight Lines [id:da9221916350614189] 
+        \draw    (420.5,267.5) -- (521,268) ;
+        %Straight Lines [id:da3595389189247501] 
+        \draw  [dash pattern={on 4.5pt off 4.5pt}]  (420.5,195.5) -- (521,196) ;
+        %Straight Lines [id:da9911062819297595] 
+        \draw [color={rgb, 255:red, 208; green, 2; blue, 27 }  ,draw opacity=1 ]   (420.5,150.5) -- (521,151) ;
+        %Straight Lines [id:da9565029051021737] 
+        \draw  [dash pattern={on 4.5pt off 4.5pt}]  (278,195.5) -- (378.5,196) ;
+        %Straight Lines [id:da5747546170446168] 
+        \draw [color={rgb, 255:red, 74; green, 144; blue, 226 }  ,draw opacity=1 ]   (278,187) -- (378.5,187.5) ;
+        %Straight Lines [id:da6143318287077666] 
+        \draw    (278,118) -- (378.5,118.5) ;
+        %Straight Lines [id:da8265628106303541] 
+        \draw    (278,55.5) -- (378.5,56) ;
+        %Straight Lines [id:da7354059102148719] 
+        \draw    (135,23.5) -- (235.5,24) ;
+        %Straight Lines [id:da6339383049584947] 
+        \draw [color={rgb, 255:red, 208; green, 2; blue, 27 }  ,draw opacity=1 ]   (420.5,150.5) -- (380,186.18) ;
+        \draw [shift={(378.5,187.5)}, rotate = 318.62] [color={rgb, 255:red, 208; green, 2; blue, 27 }  ,draw opacity=1 ][line width=0.75]    (10.93,-3.29) .. controls (6.95,-1.4) and (3.31,-0.3) .. (0,0) .. controls (3.31,0.3) and (6.95,1.4) .. (10.93,3.29)   ;
+        %Straight Lines [id:da7753532303395094] 
+        \draw [color={rgb, 255:red, 74; green, 144; blue, 226 }  ,draw opacity=1 ]   (278,187) -- (237.46,195.11) ;
+        \draw [shift={(235.5,195.5)}, rotate = 348.69] [color={rgb, 255:red, 74; green, 144; blue, 226 }  ,draw opacity=1 ][line width=0.75]    (10.93,-3.29) .. controls (6.95,-1.4) and (3.31,-0.3) .. (0,0) .. controls (3.31,0.3) and (6.95,1.4) .. (10.93,3.29)   ;
+
+        % Text Node
+        \draw (440,295.9) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$S_{n} =4.1( 1)\text{ MeV}$};
+        % Text Node
+        \draw (512.5,379.4) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$0^{+}$};
+        % Text Node
+        \draw (512.5,257.4) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$2^{+}$};
+        % Text Node
+        \draw (512.5,230.9) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$1^{+}$};
+        % Text Node
+        \draw (362,280.4) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$1/2^{+}$};
+        % Text Node
+        \draw (362,176.4) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$5/2^{+}$};
+        % Text Node
+        \draw (362,106.4) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$3/2^{+}$};
+        % Text Node
+        \draw (334.5,42.9) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$\left( 7/2,\ 3/2^{-}\right)$};
+        % Text Node
+        \draw (226,184.4) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$0^{+}$};
+        % Text Node
+        \draw (226,12.9) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$2^{+}$};
+        % Text Node
+        \draw (439.5,203.4) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$S_{2n} =6.8( 1)\text{ MeV}$};
+        % Text Node
+        \draw (296.5,203.4) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$S_{n} =2.74( 10)\text{ MeV}$};
+        % Text Node
+        \draw (422,256.4) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$4.7\ \ \text{MeV}$};
+        % Text Node
+        \draw (422,228.9) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$5.3\ \ \text{MeV}$};
+        % Text Node
+        \draw (422,139.4) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$\sim 7.5\ \ \text{MeV}$};
+        % Text Node
+        \draw (280,175.9) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$2.8\ \ \text{MeV}$};
+        % Text Node
+        \draw (280,107.4) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$4.0\ \ \text{MeV}$};
+        % Text Node
+        \draw (280,44.9) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$5.3\ \ \text{MeV}$};
+        % Text Node
+        \draw (280,279.4) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$0\ \ \text{MeV}$};
+        % Text Node
+        \draw (136,11.9) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$3.20( 1) \ \ \text{MeV}$};
+        % Text Node
+        \draw (136,183.4) node [anchor=north west][inner sep=0.75pt]  [font=\tiny]  {$0\ \ \text{MeV}$};
+        % Text Node
+        \draw (174.5,413) node [anchor=north west][inner sep=0.75pt]   [align=left] {$\displaystyle ^{22}$O};
+        % Text Node
+        \draw (309.5,413) node [anchor=north west][inner sep=0.75pt]   [align=left] {$\displaystyle ^{23}$O};
+        % Text Node
+        \draw (464,413) node [anchor=north west][inner sep=0.75pt]   [align=left] {$\displaystyle ^{24}$O};
+
+
+    \end{tikzpicture}
+
+    \caption{Energy levels and transitions for \textsuperscript{22, 23, 24}O. In red: Resonant state for the \textsuperscript{24}O and its transition to the blue resonant state of \textsuperscript{23}O. In blue: Resonant state of \textsuperscript{23}O and its transition to the ground state of \textsuperscript{22}O.}
+    \label{fig:sim_nndecay_levels}
+
+\end{figure}
+
+Since in that experiment they were able only to measure one proton during the hole deexcitation process, three possible scenarios are available, \textsuperscript{24}O\textsuperscript{*} decaying via one neutron emission follow by the emssion of a second neutron emission until reaching the \textsuperscript{22}O. Measuring any of the neutron would result in either blue or read peaks of \cref{fig:sim_nndecay_rel_energy}. However, there are still other options, the most obvious one is the simultaneous emission of two neutrons by the \textsuperscript{24}O\textsuperscript{*}, decaying directly to \textsuperscript{22}O without stopping in the resonant blue level and thus, not contributing to the previous resonant peaks. This case is not going to be explored for the moment.
+
+In order to simulate these resonances we will use the neutron generator to explore the following reactions:
+
+\begin{equation}
+    \text{ \textcolor{red}{\textsuperscript{24}O}} \longrightarrow \text{ \textcolor{blue}{\textsuperscript{23}O}} + 1n
+    \label{eq:sim_nndecay_24O_23On}
+\end{equation}
+\begin{equation}
+    \text{ \textcolor{blue}{\textsuperscript{23}O}} \longrightarrow \text{ {\textsuperscript{22}O}}  + 1n
+    \label{eq:sim_nndecay_23O_22On}
+\end{equation}
+
+From the results of \cite{Hoffman2009_O24}, we know that \cref{eq:sim_nndecay_24O_23On}, corresponds to a resonance of $\sim 0.6$ MeV, while \cref{eq:sim_nndecay_23O_22On}, to $0.045(2)$ MeV. For both cases we can simply consider the kinetic energy of the recoil fragment as the energy of the \textsuperscript{25}F beam ($\sim 650$ MeV/u). Therefore,running the generator with the following configuration:
+
+~
+
+\begin{lstlisting}[style=bash]
+$ root -l 'NeutronDecayGenerator.C("O24_O23n", 10000, 23, 8, 650., 0.6, 0.25)' 
+$ root -l 'NeutronDecayGenerator.C("O23_O22n", 10000, 22, 8, 650., 0.045, 0.02)'
+\end{lstlisting}
+
+This will generate two different \texttt{.out} files that can be separately read by the \texttt{neutronDecaySimulation.C} macro and, generate two
+
 
 \bibliographystyle{plain}
 \bibliography{bibliography}
+
+
 
 
 \end{document}
