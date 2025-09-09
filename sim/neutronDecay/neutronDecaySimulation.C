@@ -7,8 +7,8 @@
 #include "GladNeulandGeometry.h"
 #include "../utils/AsciiFileGenerator.h"
 
-void neutronDecaySimulation(Int_t nEvents = 1000,
-                            TString asciiFile = "O24_2n_res1.out")
+void neutronDecaySimulation(Int_t nEvents = 10000,
+                            TString asciiFile = "O24_2n_res1")
 {
 
     // paths
@@ -23,8 +23,8 @@ void neutronDecaySimulation(Int_t nEvents = 1000,
 
     R3BSim::Options sopt;
     sopt.transport = "TGeant4";
-    sopt.outFile = (repopath + "/results/sim" + "/sim_2ndecay_2res.root").Data();
-    sopt.parFile = (repopath + "/results/sim" + "/par_2ndecay_2res.root").Data();
+    sopt.outFile = (repopath + "/results/sim/" + "sim_" + asciiFile + ".root").Data();
+    sopt.parFile = (repopath + "/results/sim/" + "par_" + asciiFile + ".root").Data();
     sopt.materials = "media_r3b.geo";
     sopt.storeTraj = kTRUE;
     sopt.maxNSteps = -15000;
@@ -32,6 +32,6 @@ void neutronDecaySimulation(Int_t nEvents = 1000,
 
     R3BSim sim(sopt);
     sim.withGeometry(std::make_unique<GladNeulandGeometry>(gopt))
-        .withGenerator(std::make_unique<AsciiFileGenerator>((repopath + "/sim/gen/" + asciiFile).Data(), 0., 0., 0.))
+        .withGenerator(std::make_unique<AsciiFileGenerator>((repopath + "/sim/gen/" + asciiFile + ".out").Data(), 0., 0., 0.))
         .run(nEvents);
 }
