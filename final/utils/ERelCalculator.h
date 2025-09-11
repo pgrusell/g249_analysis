@@ -38,25 +38,31 @@ public:
             const double Minv = std::sqrt(std::max(0.0, Et * Et - Pt2));
             const double Erel_GeV = Minv - (m1 + m2);
             fErel.push_back(Erel_GeV * 1e3);
-
         }
     }
 
-    void plotErel()
+    void plotErel(TString out = "")
     {
-        auto *h = new TH1F("h", "h", 200, 0, 3);
+        fErelSpectra = new TH1F("h", "h", 200, 0, 3);
 
         for (auto const &erel : fErel)
         {
-            h->Fill(erel);
+            fErelSpectra->Fill(erel);
         }
 
-        h->Draw();
+        fErelSpectra->Draw();
+
+        if (out == "")
+            return;
+
+        auto *f = new TFile(out, "RECREATE");
+        fErelSpectra->Write();
     }
 
 protected:
     std::vector<std::vector<double>> fKinematics;
     std::vector<double> fErel;
+    TH1F *fErelSpectra;
 };
 
 // First implementation: without neuland response
@@ -66,8 +72,15 @@ public:
     void getData(const std::vector<TString> inputFiles, const std::vector<int> particles) override
     {
 
+        // Lambda function for applying uncertainties
+        auto gausDiff = [](double val)
+        {
+            return gRandom->Gaus(val, 0.005 * val);
+        };
+
         // Vector to store the kinematic information to calculate the Erel
-        std::vector<std::vector<double>> Kinematics;
+        std::vector<std::vector<double>>
+            Kinematics;
         std::vector<double> iKinematics;
 
         // Get the input file with the data
@@ -86,11 +99,15 @@ public:
 
         // Get branch mctrack
         TTreeReaderArray<R3BMCTrack> tracks(reader, "MCTrack");
+        TTreeReaderArray<R3BNeulandPoint> neuland(reader, "NeulandPoints");
 
         // Event loop
         while (reader.Next())
         {
             std::vector<double> iKinematics;
+
+            // Save the event if we have hit in neuland
+            neuland.GetSize() > 0 ? fEffGeoVals.push_back(1) : fEffGeoVals.push_back(0);
 
             for (const auto &tr : tracks)
             {
@@ -104,9 +121,9 @@ public:
                     if (part == tr.GetPdgCode())
                     {
                         iKinematics.push_back(tr.GetMass());
-                        iKinematics.push_back(tr.GetPx());
-                        iKinematics.push_back(tr.GetPy());
-                        iKinematics.push_back(tr.GetPz());
+                        iKinematics.push_back(gausDiff(tr.GetPx()));
+                        iKinematics.push_back(gausDiff(tr.GetPy()));
+                        iKinematics.push_back(gausDiff(tr.GetPz()));
                     }
                 }
             }
@@ -121,9 +138,62 @@ public:
             {
                 fKinematics.push_back(std::move(iKinematics));
             }
-
         }
     }
+
+    // Method to calculate the geometric efficiency
+    // VERY PRELIMINAR
+    void calEff()
+    {
+
+        std::cerr << "[WARN] This method is not ready!";
+
+        if (fErel.size() == 0)
+        {
+            std::cerr << "[ERROR] Erel has not been calculated yet\n";
+            return;
+        }
+
+        if (fErel.size() != fEffGeoVals.size())
+        {
+            std::cerr << "[ERROR] Erel and fEffGeo don't have the same size";
+            return;
+        }
+
+        // Calculate the geometrical efficiency
+        for (int i = 0; i < fEffGeoVals.size(); i++)
+        {
+            fEffGeoMap.insert({fErel[i], fEffGeoVals[i]});
+        }
+    }
+
+    // Method to plot all efficiencies
+    void plotEfficiencies(bool geo = true)
+    {
+
+        std::cerr << "[WARN] This method is not ready!";
+
+        // Geometrical efficiency
+        if (geo)
+        {
+            fHistEffGeo = new TH2F("h_geo", "h_geo", 100, 0, 3, 100, 0, 2);
+
+            for (const auto &[erel, eff] : fEffGeoMap)
+            {
+                fHistEffGeo->Fill(erel, eff);
+
+                std::cout << erel << " " << eff << std::endl;
+            }
+
+            fHistEffGeo->Draw();
+        }
+    }
+
+private:
+    std::map<double, double> fEffGeoMap;
+    TH2F *fHistEffGeo;
+    std::vector<double> fEffGeoVals;
+    std::vector<double> fEffIntVals;
 };
 
 class ERelExpCalculator : public IERelCalculator
