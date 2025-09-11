@@ -2,6 +2,6 @@ void O24_2n_decay()
 {
     gSystem->ChangeDirectory("..");
 
-    gSystem->Exec("root -l -q 'neutronDecaySimulation.C(10000, \"O24_O23n\")'");
-    gSystem->Exec("root -l -q 'neutronDecaySimulation.C(10000, \"O23_O22n\")'");
+    gSystem->Exec("root -l -q 'neutronDecaySimulation.C(100000, \"O24_O23n\")'");
+    gSystem->Exec("root -l -q 'neutronDecaySimulation.C(100000, \"O23_O22n\")'");
 }
