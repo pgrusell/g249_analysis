@@ -4,6 +4,8 @@
 #include <iostream>
 #include <vector>
 
+#include "../../utils/plotStyles.h"
+
 // This class can be used to calculate the Erel spectra from a given data.
 // The data should come in a std::vector for each particle, for our case
 // Energy of the neutron and energy of the fragment.
@@ -43,7 +45,12 @@ public:
 
     void plotErel(TString out = "")
     {
-        fErelSpectra = new TH1F("h", "h", 200, 0, 3);
+
+        auto *c = new TCanvas("c");
+        setCanvasStyle(c);
+
+        fErelSpectra = new TH1F("h", "", 200, 0, 3);
+        setHistogramStyle(fErelSpectra, "E_{rel}", "Counts");
 
         for (auto const &erel : fErel)
         {
