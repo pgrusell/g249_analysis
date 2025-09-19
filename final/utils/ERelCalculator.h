@@ -4,7 +4,7 @@
 #include <iostream>
 #include <vector>
 
-#include "../../utils/histogramStyles.h"
+#include "../../utils/plotStyles.h"
 
 // This class can be used to calculate the Erel spectra from a given data.
 // The data should come in a std::vector for each particle, for our case
