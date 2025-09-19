@@ -47,11 +47,7 @@ public:
     {
 
         auto *c = new TCanvas("c");
-        c->SetLeftMargin(0.12);
-        c->SetBottomMargin(0.12);
-        c->SetTopMargin(0.08);
-        c->SetRightMargin(0.05);
-        c->SetFrameLineColor(kBlack);
+        setCanvasStyle(c);
 
         fErelSpectra = new TH1F("h", "", 200, 0, 3);
         setHistogramStyle(fErelSpectra, "E_{rel}", "Counts");
