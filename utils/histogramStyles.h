@@ -9,11 +9,21 @@ inline void setHistogramStyle(TH1F *h, TString xTit, TString yTit)
 
     h->GetXaxis()
         ->SetTitleOffset(1.1);
-    h->GetXaxis()->SetTitleOffset(1.2);
+    h->GetYaxis()->SetTitleOffset(1.2);
 
     h->GetXaxis()->SetTitle(xTit);
     h->GetYaxis()->SetTitle(yTit);
 
     h->GetXaxis()->SetAxisColor(kBlack);
     h->GetYaxis()->SetAxisColor(kBlack);
+}
+
+inline void setCanvasStyle(TCanvas *c)
+{
+    c->SetLeftMargin(0.12);
+    c->SetBottomMargin(0.12);
+    c->SetTopMargin(0.08);
+    c->SetRightMargin(0.05);
+    c->SetFrameLineColor(kBlack);
+    c->SetTicks(1, 1);
 }
