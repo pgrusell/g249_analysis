@@ -56,7 +56,7 @@ public:
 
     // This method will build the ToF vs Paddle histogram from the dataFile
     // If the offsets have already been calculated we can apply them
-    void buildHistogram(std::vector<TString> dataFileAbs, bool withOffsets = false, bool both = false)
+    void buildHistogram(std::vector<TString> dataFileAbs, bool withOffsets = false)
     {
 
         TString absPath = static_cast<TString>(getenv("repopath")) + "/data/";
@@ -96,15 +96,11 @@ public:
         }
 
         withOffsets ? hTofVsPaddlesCorr = hTofVsPad : hTofVsPaddles = hTofVsPad;
-        TString titHist = withOffsets ?
+        TString titHist = withOffsets ? "histogram_Corrected.root" : "histogram_Uncorrected.root";
 
-                                      auto *f = new TFile("histogram_built.root", "RECREATE");
+        auto *f = new TFile("histogram_built.root", "RECREATE");
         hTofVsPaddlesCorr->Write();
         delete f;
-
-        if (both)
-        {
-        }
     }
 
     // This method takes the corrected histogram from rootFile
