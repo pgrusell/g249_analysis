@@ -2,10 +2,16 @@
 
 #include <TStyle.h>
 
+inline void setOpenGL()
+{
+    gStyle->SetCanvasPreferGL(kTRUE);
+}
+
 inline void setHistogramStyle(TH1 *h, TString xTit, TString yTit, int color = kCyan)
 {
 
     h->SetFillColor(color - 3);
+    h->SetFillStyle(1001);
     h->SetFillColorAlpha(color - 3, 0.3);
     h->SetLineColor(kBlack);
     h->SetLineWidth(2);
