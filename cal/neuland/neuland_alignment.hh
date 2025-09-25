@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <fstream>
+
 #include "../../utils/plotStyles.h"
 
 class neulandAlignment
@@ -23,12 +25,15 @@ public:
         if (hitsFile != "")
         {
             auto *histDataFile = new TFile(histFilePath, "READ");
-            auto *h = static_cast<TH2D *>(histDataFile->Get("hTofVsPaddles"));
+            auto *h = static_cast<TH2D *>(histDataFile->Get("hTofVsPad"));
 
             // Clean the histogram
-            int threshold = 30;
-            threshold = 15;
-            TH2D *hTofVsPaddlesNotCleaned = (TH2D *)h->RebinY(10, "hTofVsPaddlesRebbined");
+            int threshold = 40;
+
+            TH2D *hTofVsPaddlesNotCleaned = (TH2D *)h->RebinY(1, "hTofVsPaddlesRebbined");
+
+            delete h;
+
             hTofVsPaddles = (TH2D *)hTofVsPaddlesNotCleaned->Clone("hTofVsPaddles");
 
             for (int ix = 1; ix <= hTofVsPaddles->GetNbinsX(); ix++)
@@ -51,7 +56,7 @@ public:
 
     // This method will build the ToF vs Paddle histogram from the dataFile
     // If the offsets have already been calculated we can apply them
-    void buildHistogram(std::vector<TString> dataFileAbs, bool withOffsets = false)
+    void buildHistogram(std::vector<TString> dataFileAbs, bool withOffsets = false, bool both = false)
     {
 
         TString absPath = static_cast<TString>(getenv("repopath")) + "/data/";
@@ -72,7 +77,7 @@ public:
         const double c = 29.979;    // cm/ns
         auto *hTofVsPad = new TH2D("hTofVsPad", "ToF vs Paddle;Paddle;ToF (ns)",
                                    1300, 0.0, 1300.0,
-                                   1000, 46.0, 55.0);
+                                   200, 46.0, 55.0);
 
         while (reader.Next())
         {
@@ -83,12 +88,32 @@ public:
 
             for (auto const &neu : neuland)
             {
-                const double tof_corr = neu.GetT() - (neu.GetPosition().Mag() - Lref) / c - withOffsets * fTofOffsets[neu.GetPaddle() - 1];
+                // const double tof_corr = neu.GetT() - (neu.GetPosition().Mag() - Lref) / c - withOffsets * fTofOffsets[neu.GetPaddle() - 1];
+                const double v_light = neu.GetPosition().Mag() / neu.GetT();
+                const double tof_corr = Lref / v_light - withOffsets * fTofOffsets[neu.GetPaddle() - 1];
                 hTofVsPad->Fill(neu.GetPaddle() - 1, tof_corr);
             }
         }
 
         withOffsets ? hTofVsPaddlesCorr = hTofVsPad : hTofVsPaddles = hTofVsPad;
+        TString titHist = withOffsets ?
+
+                                      auto *f = new TFile("histogram_built.root", "RECREATE");
+        hTofVsPaddlesCorr->Write();
+        delete f;
+
+        if (both)
+        {
+        }
+    }
+
+    // This method takes the corrected histogram from rootFile
+    void setCorrectedFromRoot(TString histoPath)
+    {
+
+        auto *histDataFile = new TFile(histoPath, "READ");
+        auto *h = static_cast<TH2D *>(histDataFile->Get("hTofVsPad"));
+        hTofVsPaddlesCorr = h;
     }
 
     // This method can be used to initialize the offsets
@@ -105,14 +130,35 @@ public:
             delete profile;
         }
 
-        std::ofstream out("out.txt");
+        std::ofstream out("offsets_v1.txt");
 
         for (int i = 0; i < fNPaddles; i++)
         {
-            out << i + 1 << " " << fTofOffsets[i] << std::endl;
+            out << i + 1 << " " << fTofOffsets[i] << " " << fFitPars[i][0] << " " << fFitPars[i][1] << std::endl;
         }
 
         out.close();
+    }
+
+    void setOffsetsFromTxt(std::string inputFile = "offsets_v1.txt")
+    {
+        std::ifstream input(inputFile);
+        std::string line;
+        fTofOffsets.resize(fNPaddles);
+
+        while (std::getline(input, line))
+        {
+            std::istringstream ss(line);
+            std::vector<double> fileVals;
+            double val;
+
+            while (ss >> val)
+            {
+                fileVals.push_back(val);
+            }
+
+            fTofOffsets[fileVals[0] - 1] = fileVals[1];
+        }
     }
 
     // Method to fit the particular profile
@@ -121,6 +167,7 @@ public:
         if (profile->Integral() < 1)
         {
             fTofOffsets.push_back(0.);
+            fFitPars.push_back(std::vector<double>{0., 0.});
             return;
         }
 
@@ -131,52 +178,25 @@ public:
         auto f1 = new TF1("f_gauss", "gaus", 0, 0);
         f1->SetRange(min, max);
 
-        profile->Fit(f1, "Q");
-        double offset = f1->GetParameter(1) - 51.94;
+        profile->Fit(f1, "QR");
+        double offset = f1->GetParameter(1) - 51.95;
 
         // profile->Draw();
         fTofOffsets.push_back(offset);
+        fFitPars.push_back(std::vector<double>{f1->GetParameter(1), f1->GetParameter(2)});
     }
 
     // Method to check the alignment
-    void checkAlignment(int nProfiles = 5)
+    void checkAlignment(int nProfiles = 5, bool corrected = false)
     {
-        // Plot the profiling without offsets
-        auto *prof = hTofVsPaddles->ProfileX("prof");
-
-        auto *c = new TCanvas("c", "");
-        setCanvasStyle(c);
-
-        auto *gr = new TGraph(fNPaddles);
-        auto *grNotAligned = new TGraph(fNPaddles);
-
-        for (int i = 0; i < fNPaddles; i++)
-        {
-            gr->SetPoint(i, prof->GetBinCenter(i + 1), prof->GetBinContent(i + 1) - fTofOffsets[i]);
-            grNotAligned->SetPoint(i, prof->GetBinCenter(i + 1), prof->GetBinContent(i + 1));
-        }
-
-        gr->SetLineColor(kBlack);
-        gr->SetMarkerColor(kBlack);
-        gr->SetMarkerStyle(6);
-
-        grNotAligned->SetLineColor(kRed);
-        grNotAligned->SetMarkerColor(kRed);
-        grNotAligned->SetMarkerStyle(6);
-
-        gr->Draw("AP");
-        grNotAligned->Draw("P SAME");
-
-        c->SaveAs("test1.png");
-
-        delete c;
 
         // Plot different profiles to check the alignment
-        TH2 *hToCheck = hTofVsPaddlesCorr ? (TH2 *)hTofVsPaddlesCorr : (TH2 *)hTofVsPaddles;
-        c = new TCanvas("c");
-        setCanvasStyle(c);
+        TH2 *hToCheck = corrected ? (TH2 *)hTofVsPaddlesCorr : (TH2 *)hTofVsPaddles;
+        TString figTit = corrected ? "figCorr.png" : "figUncorr.png";
 
-        hToCheck->Draw();
+        setOpenGL();
+        auto c = new TCanvas("c");
+        setCanvasStyle(c);
 
         std::vector<std::pair<TH1D *, double>> profiles;
         profiles.reserve(nProfiles);
@@ -202,10 +222,10 @@ public:
             if (i == 0)
                 profiles[i].first->Draw();
             else
-                profiles[i].first->Draw("same");
+                profiles[i].first->Draw("SAME");
         }
 
-        c->SaveAs("test2.png");
+        c->SaveAs(figTit);
         // delete c;
     }
 
@@ -214,4 +234,5 @@ private:
     TH2D *hTofVsPaddles = nullptr;
     TH2D *hTofVsPaddlesCorr = nullptr;
     std::vector<double> fTofOffsets;
+    std::vector<std::vector<double>> fFitPars;
 };
