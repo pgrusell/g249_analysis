@@ -79,7 +79,7 @@ public:
         const double Lref = 1557.0; // cm
         const double c = 29.979;    // cm/ns
         auto *hTofVsPad = new TH2D("hTofVsPad", "ToF vs Paddle;Paddle;ToF (ns)",
-                                   1300, 0.0, 1300.0,
+                                   1300, -0.5, 1299.5,
                                    200, 46.0, 55.0);
 
         while (reader.Next())
