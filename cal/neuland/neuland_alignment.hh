@@ -22,7 +22,7 @@ public:
         // Absolute path of the file
         TString histFilePath = static_cast<TString>(getenv("repopath")) + "/results/cal/" + hitsFile;
 
-        fResults = new TFile("results.root", "RECREATE");
+        fResults = new TFile("resultsTest.root", "RECREATE");
 
         // If the dataFile contains the histograms get it
         if (hitsFile != "")
@@ -57,10 +57,14 @@ public:
         }
     }
 
-    // This method will build the ToF vs Paddle histogram from the dataFile
-    // If the offsets have already been calculated we can apply them
-    void buildHistogram(std::vector<TString> dataFileAbs, bool withOffsets = false)
+    void buildHistogram(std::vector<TString> dataFileAbs, bool withOffsets = false, int TofOrSpeed = 0)
     {
+
+        if (withOffsets && fTofOffsets.size() == 0)
+        {
+            std::cerr << "[FATAL] Offsets have not been initialized\n";
+            return;
+        }
 
         TString absPath = static_cast<TString>(getenv("repopath")) + "/data/";
 
@@ -78,30 +82,50 @@ public:
         int ievt = 0;
         const double Lref = 1557.0; // cm
         const double c = 29.979;    // cm/ns
+        const double timeTarget = 7.423887;
+
+        double binTofMin = -50.;
+        double binTofMax = 50.;
+        double nBinsTof = 2200;
+
+        if (withOffsets)
+        {
+            binTofMin = 46.0;
+            binTofMax = 55.0;
+            nBinsTof = 200;
+        }
+
+        /*
         auto *hTofVsPad = new TH2D("hTofVsPad", "ToF vs Paddle;Paddle;ToF (ns)",
                                    1300, -0.5, 1299.5,
                                    200, 46.0, 55.0);
+        */
+
+        auto *hTofVsPad = new TH2D("hTofVsPad", "ToF vs Paddle;Paddle;ToF (ns)",
+                                   1300, -0.5, 1299.5,
+                                   nBinsTof, binTofMin, binTofMax);
 
         while (reader.Next())
         {
             if ((++ievt % 100000) == 0)
             {
-                std::cout << ievt << '\n';
+                std::cout << 100.0 * ievt / chain.GetEntries() << " %\n";
             }
 
             for (auto const &neu : neuland)
             {
-                // const double tof_corr = neu.GetT() - (neu.GetPosition().Mag() - Lref) / c - withOffsets * fTofOffsets[neu.GetPaddle() - 1];
-                const double v_light = neu.GetPosition().Mag() / neu.GetT();
-                double dT = withOffsets ? fTofOffsets[neu.GetPaddle() - 1] : 0;
 
-                // Disregard bad aligned bars
-                if (std::abs(dT) > 2.5)
-                    dT = 0;
+                double dToFOffset = 0;
 
-                const double tof_corr = Lref / v_light - dT;
-                // const double tof_corr = Lref / v_light;
-                hTofVsPad->Fill(neu.GetPaddle() - 1, tof_corr);
+                if (withOffsets)
+                {
+                    dToFOffset = (std::abs(fTofOffsets[neu.GetPaddle() - 1]) < 2.5) ? fTofOffsets[neu.GetPaddle() - 1] : 0;
+                }
+
+                const double timeDiff = neu.GetT() - timeTarget - neu.GetPosition().Mag() / c;
+
+                if (!std::isnan(timeDiff) && neu.GetT() > 0)
+                    hTofVsPad->Fill(neu.GetPaddle() - 1, timeDiff - dToFOffset);
             }
         }
 
@@ -135,7 +159,7 @@ public:
             delete profile;
         }
 
-        std::ofstream out("offsets_v1.txt");
+        std::ofstream out("offsets_v2.txt");
 
         for (int i = 0; i < fNPaddles; i++)
         {
@@ -176,7 +200,25 @@ public:
             return;
         }
 
-        double center = profile->GetBinCenter(profile->GetMaximumBin());
+        int binMin = profile->FindBin(-9);
+        int binMax = profile->FindBin(-7.6);
+
+        int maxBin = binMin;
+        double maxContent = profile->GetBinContent(binMin);
+
+        for (int b = binMin + 1; b <= binMax; ++b)
+        {
+            double content = profile->GetBinContent(b);
+            if (content > maxContent)
+            {
+                maxContent = content;
+                maxBin = b;
+            }
+        }
+
+        double center = profile->GetBinCenter(maxBin);
+
+        // double center = profile->GetBinCenter(profile->GetMaximumBin());
         double min = center - 0.5;
         double max = center + 0.5;
 
@@ -184,7 +226,7 @@ public:
         f1->SetRange(min, max);
 
         profile->Fit(f1, "QR");
-        double offset = f1->GetParameter(1) - 51.95;
+        double offset = f1->GetParameter(1);
 
         // profile->Draw();
         fTofOffsets.push_back(offset);
@@ -195,6 +237,7 @@ private:
     const int fNPaddles = 1300;
     TH2D *hTofVsPaddles = nullptr;
     TH2D *hTofVsPaddlesCorr = nullptr;
+    TH2D *hOffsets = nullptr;
     std::vector<double> fTofOffsets;
     std::vector<std::vector<double>> fFitPars;
     TFile *fResults = nullptr;

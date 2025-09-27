@@ -14,7 +14,7 @@
 // OPTION 2:
 // Hybrid option (deprecated)
 
-void neuland_alignment(int mode = 0)
+void neuland_alignment(int mode = 3)
 {
     /*
     // Histogram with the first parameters
@@ -73,6 +73,15 @@ void neuland_alignment(int mode = 0)
         auto neul = std::make_unique<neulandAlignment>("h_v3_aligned.root", rootFile);
         neul->setOffsetsFromTxt("offsets_v1.txt");
         neul->buildHistogram(rootFile, true);
+        break;
+    }
+    case 3:
+    {
+
+        auto neul = std::make_unique<neulandAlignment>("resultsTest.root", rootFile);
+        neul->calculateOffsets();
+        // neul->buildHistogram(rootFile, false);
+
         break;
     }
     }
