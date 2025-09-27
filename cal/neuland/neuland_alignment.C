@@ -52,11 +52,8 @@ void neuland_alignment(int mode = 0)
     {
 
         auto neul = std::make_unique<neulandAlignment>("", rootFile);
-        neul->buildHistogram(rootFile, false);
-        neul->checkAlignment(10, false);
-        neul->calculateOffsets();
+        neul->setOffsetsFromTxt();
         neul->buildHistogram(rootFile, true);
-        neul->checkAlignment(10, true);
 
         break;
     }
@@ -66,9 +63,8 @@ void neuland_alignment(int mode = 0)
 
         auto neul = std::make_unique<neulandAlignment>("");
         neul->setCorrectedFromRoot("histogram_builtCorr.root");
-        neul->setUncorrectedFromRoot("histogram_built.root")
 
-            break;
+        break;
     }
 
     case 2:
@@ -76,9 +72,7 @@ void neuland_alignment(int mode = 0)
         std::cerr << "[WARN] This option is deprecated\n";
         auto neul = std::make_unique<neulandAlignment>("h_v3_aligned.root", rootFile);
         neul->setOffsetsFromTxt("offsets_v1.txt");
-        neul->checkAlignment(10, false);
         neul->buildHistogram(rootFile, true);
-        neul->checkAlignment(10, true);
         break;
     }
     }

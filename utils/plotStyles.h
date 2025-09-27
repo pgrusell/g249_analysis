@@ -10,12 +10,27 @@ inline void setOpenGL()
 inline void setHistogramStyle(TH1 *h, TString xTit, TString yTit, int color = kCyan)
 {
 
+    h->SetTitle("");
     h->SetFillColor(color - 3);
     h->SetFillStyle(1001);
     h->SetFillColorAlpha(color - 3, 0.3);
-    h->SetLineColor(kBlack);
+    h->SetLineColor(color);
     h->SetLineWidth(2);
 
+    h->GetXaxis()
+        ->SetTitleOffset(1.1);
+    h->GetYaxis()->SetTitleOffset(1.8);
+
+    h->GetXaxis()->SetTitle(xTit);
+    h->GetYaxis()->SetTitle(yTit);
+
+    h->GetXaxis()->SetAxisColor(kBlack);
+    h->GetYaxis()->SetAxisColor(kBlack);
+}
+
+inline void setHistogramStyle(TH2 *h, TString xTit, TString yTit)
+{
+    h->SetTitle("");
     h->GetXaxis()
         ->SetTitleOffset(1.1);
     h->GetYaxis()->SetTitleOffset(1.2);
@@ -29,11 +44,14 @@ inline void setHistogramStyle(TH1 *h, TString xTit, TString yTit, int color = kC
 
 inline void setCanvasStyle(TCanvas *c)
 {
+    gStyle->SetPadRightMargin(0.05);
+    gStyle->SetPadLeftMargin(0.15);
+    // gStyle->SetPadRightMargin(0.15);
     gStyle->SetCanvasPreferGL(kTRUE);
+    gStyle->SetOptStat(0);
     c->SetLeftMargin(0.12);
     c->SetBottomMargin(0.12);
     c->SetTopMargin(0.08);
-    c->SetRightMargin(0.05);
     c->SetFrameLineColor(kBlack);
     c->SetTicks(1, 1);
 }

@@ -11,6 +11,7 @@
 #include <fstream>
 
 #include "../../utils/plotStyles.h"
+#include "neuland_alignment_analysis.hh"
 
 class neulandAlignment
 {
@@ -21,36 +22,38 @@ public:
         // Absolute path of the file
         TString histFilePath = static_cast<TString>(getenv("repopath")) + "/results/cal/" + hitsFile;
 
+        fResults = new TFile("results.root", "RECREATE");
+
         // If the dataFile contains the histograms get it
         if (hitsFile != "")
         {
+
             auto *histDataFile = new TFile(histFilePath, "READ");
             auto *h = static_cast<TH2D *>(histDataFile->Get("hTofVsPad"));
 
             // Clean the histogram
-            int threshold = 40;
-
+            int threshold = 0;
             TH2D *hTofVsPaddlesNotCleaned = (TH2D *)h->RebinY(1, "hTofVsPaddlesRebbined");
+            neulandAlignmentAnalysis::cleanHistogram(hTofVsPaddlesNotCleaned, hTofVsPaddles, "hTofVsPaddles", threshold);
 
-            delete h;
-
-            hTofVsPaddles = (TH2D *)hTofVsPaddlesNotCleaned->Clone("hTofVsPaddles");
-
-            for (int ix = 1; ix <= hTofVsPaddles->GetNbinsX(); ix++)
-            {
-                for (int iy = 1; iy <= hTofVsPaddles->GetNbinsY(); iy++)
-                {
-                    double content = hTofVsPaddles->GetBinContent(ix, iy);
-                    if (content < threshold)
-                        hTofVsPaddles->SetBinContent(ix, iy, 0);
-                }
-            }
+            hTofVsPaddles->SetDirectory(nullptr);
+            delete histDataFile;
         }
-
         // Call the method to retrieve it from the data
         else
         {
             buildHistogram(dataFile, false);
+        }
+    }
+
+    ~neulandAlignment()
+    {
+        if (fResults)
+        {
+            fResults->Write();
+            fResults->Close();
+            delete fResults;
+            fResults = nullptr;
         }
     }
 
@@ -90,23 +93,29 @@ public:
             {
                 // const double tof_corr = neu.GetT() - (neu.GetPosition().Mag() - Lref) / c - withOffsets * fTofOffsets[neu.GetPaddle() - 1];
                 const double v_light = neu.GetPosition().Mag() / neu.GetT();
-                const double tof_corr = Lref / v_light - withOffsets * fTofOffsets[neu.GetPaddle() - 1];
+                double dT = withOffsets ? fTofOffsets[neu.GetPaddle() - 1] : 0;
+
+                // Disregard bad aligned bars
+                if (std::abs(dT) > 2.5)
+                    dT = 0;
+
+                const double tof_corr = Lref / v_light - dT;
+                // const double tof_corr = Lref / v_light;
                 hTofVsPad->Fill(neu.GetPaddle() - 1, tof_corr);
             }
         }
 
         withOffsets ? hTofVsPaddlesCorr = hTofVsPad : hTofVsPaddles = hTofVsPad;
-        TString titHist = withOffsets ? "histogram_Corrected.root" : "histogram_Uncorrected.root";
+        TString titHist = withOffsets ? "hCorrected" : "hUncorrected";
 
-        auto *f = new TFile("histogram_built.root", "RECREATE");
-        hTofVsPaddlesCorr->Write();
-        delete f;
+        auto *hToSave = hTofVsPad->Clone(titHist);
+        fResults->cd();
+        hToSave->Write();
     }
 
     // This method takes the corrected histogram from rootFile
     void setCorrectedFromRoot(TString histoPath)
     {
-
         auto *histDataFile = new TFile(histoPath, "READ");
         auto *h = static_cast<TH2D *>(histDataFile->Get("hTofVsPad"));
         hTofVsPaddlesCorr = h;
@@ -182,53 +191,11 @@ public:
         fFitPars.push_back(std::vector<double>{f1->GetParameter(1), f1->GetParameter(2)});
     }
 
-    // Method to check the alignment
-    void checkAlignment(int nProfiles = 5, bool corrected = false)
-    {
-
-        // Plot different profiles to check the alignment
-        TH2 *hToCheck = corrected ? (TH2 *)hTofVsPaddlesCorr : (TH2 *)hTofVsPaddles;
-        TString figTit = corrected ? "figCorr.png" : "figUncorr.png";
-
-        setOpenGL();
-        auto c = new TCanvas("c");
-        setCanvasStyle(c);
-
-        std::vector<std::pair<TH1D *, double>> profiles;
-        profiles.reserve(nProfiles);
-        const int nY = fNPaddles;
-
-        for (int i = 0; i < nProfiles; ++i)
-        {
-            const int num = 100 * i;
-            TH1D *prof = hToCheck->ProjectionY(Form("h_prof_%d", i), num, num);
-            profiles.emplace_back(prof, prof->GetMaximum());
-        }
-
-        std::sort(profiles.begin(), profiles.end(),
-                  [](const auto &a, const auto &b)
-                  { return a.second > b.second; });
-
-        auto colors = makeViridisColors(profiles.size());
-
-        for (auto i = 0; i < colors.size(); i++)
-        {
-            setHistogramStyle(profiles[i].first, "ToF [ns]", "# Counts", colors[i]);
-
-            if (i == 0)
-                profiles[i].first->Draw();
-            else
-                profiles[i].first->Draw("SAME");
-        }
-
-        c->SaveAs(figTit);
-        // delete c;
-    }
-
 private:
     const int fNPaddles = 1300;
     TH2D *hTofVsPaddles = nullptr;
     TH2D *hTofVsPaddlesCorr = nullptr;
     std::vector<double> fTofOffsets;
     std::vector<std::vector<double>> fFitPars;
+    TFile *fResults = nullptr;
 };
