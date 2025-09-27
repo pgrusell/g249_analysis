@@ -10,8 +10,9 @@ public:
 
         TString resultsPath = static_cast<TString>(getenv("repopath")) + "/results/cal/";
 
-        TString histFilePath = resultsPath + "/results/cal/" + resultsFile;
-        auto *histDataFile = new TFile(resultsFile, "READ");
+        TString histFilePath = resultsPath + resultsFile;
+        std::cout << histFilePath << std::endl;
+        auto *histDataFile = new TFile(histFilePath, "READ");
 
         hUncorrected = static_cast<TH2D *>(histDataFile->Get("hUncorrected"));
         hCorrected = static_cast<TH2D *>(histDataFile->Get("hCorrected"));
@@ -20,10 +21,10 @@ public:
         cleanHistogram(hCorrected, hCorrectedCleaned, "hCorrectedCleaned");
 
         // save ToF vs paddle histograms in pdf files
-        printCanvases();
+        printCanvases(resultsPath);
 
         // save the ToF projection over Y axis
-        totalProfile();
+        totalProfile(resultsPath);
 
         // plot profiles for uncorrected
         checkAlignment(hUncorrected, resultsPath + "single_prof_uncorr.pdf", 10);
@@ -47,7 +48,7 @@ public:
         }
     }
 
-    void printCanvases()
+    void printCanvases(TString path)
     {
         setOpenGL();
 
@@ -56,7 +57,7 @@ public:
         setCanvasStyle(c1);
         setHistogramStyle(hUncorrected, "Paddle #", "ToF [ns]");
         hUncorrected->Draw("COLZ");
-        c1->SaveAs("hUncorrected.pdf");
+        c1->SaveAs(path + "hUncorrected.pdf");
         delete c1;
 
         // hCorrected
@@ -64,7 +65,7 @@ public:
         setCanvasStyle(c2);
         setHistogramStyle(hCorrected, "Paddle #", "ToF [ns]");
         hCorrected->Draw("COLZ");
-        c2->SaveAs("hCorrected.pdf");
+        c2->SaveAs(path + "hCorrected.pdf");
         delete c2;
 
         // hUncorrectedCleaned
@@ -72,7 +73,7 @@ public:
         setCanvasStyle(c3);
         setHistogramStyle(hUncorrectedCleaned, "Paddle #", "ToF [ns]");
         hUncorrectedCleaned->Draw("COLZ");
-        c3->SaveAs("hUncorrectedCleaned.pdf");
+        c3->SaveAs(path + "hUncorrectedCleaned.pdf");
         delete c3;
 
         // hCorrectedCleaned
@@ -80,11 +81,11 @@ public:
         setCanvasStyle(c4);
         setHistogramStyle(hCorrectedCleaned, "Paddle #", "ToF [ns]");
         hCorrectedCleaned->Draw("COLZ");
-        c4->SaveAs("hCorrectedCleaned.pdf");
+        c4->SaveAs(path + "hCorrectedCleaned.pdf");
         delete c4;
     }
 
-    void totalProfile()
+    void totalProfile(TString path)
     {
 
         auto *prCorrected = hCorrected->ProjectionY("prCorr");
@@ -97,7 +98,7 @@ public:
         setCanvasStyle(c5);
         prCorrected->Draw();
         prUncorrected->Draw("same");
-        c5->SaveAs("hProfTot.pdf");
+        c5->SaveAs(path + "hProfTot.pdf");
         delete c5;
     }
 
