@@ -16,20 +16,22 @@
 class neulandAlignment
 {
 public:
-    neulandAlignment(TString hitsFile = "", std::vector<TString> dataFile = {})
+    neulandAlignment(TString hitsFile = "", std::vector<TString> dataFile = {}, int TofOrDt = 1)
     {
 
         // Absolute path of the file
         TString histFilePath = static_cast<TString>(getenv("repopath")) + "/results/cal/" + hitsFile;
 
-        fResults = new TFile("resultsTest.root", "RECREATE");
+        fResults = new TFile("resultsTest.root", "UPDATE");
 
         // If the dataFile contains the histograms get it
         if (hitsFile != "")
         {
 
-            auto *histDataFile = new TFile(histFilePath, "READ");
-            auto *h = static_cast<TH2D *>(histDataFile->Get("hTofVsPad"));
+            // auto *histDataFile = new TFile(histFilePath, "READ");
+
+            TString histName = TofOrDt ? "hUncorrectedToF" : "hUncorrecteddT";
+            auto *h = static_cast<TH2D *>(fResults->Get(histName));
 
             // Clean the histogram
             int threshold = 0;
@@ -37,12 +39,12 @@ public:
             neulandAlignmentAnalysis::cleanHistogram(hTofVsPaddlesNotCleaned, hTofVsPaddles, "hTofVsPaddles", threshold);
 
             hTofVsPaddles->SetDirectory(nullptr);
-            delete histDataFile;
+            // delete histDataFile;
         }
         // Call the method to retrieve it from the data
         else
         {
-            buildHistogram(dataFile, false);
+            buildHistogram(dataFile, false, TofOrDt);
         }
     }
 
@@ -57,14 +59,12 @@ public:
         }
     }
 
-    void buildHistogram(std::vector<TString> dataFileAbs, bool withOffsets = false, int TofOrSpeed = 0)
+    void buildHistogram(std::vector<TString> dataFileAbs, bool withOffsets = false, int TofOrDt = 1)
     {
 
-        if (withOffsets && fTofOffsets.size() == 0)
-        {
-            std::cerr << "[FATAL] Offsets have not been initialized\n";
-            return;
-        }
+        // Four options:
+        // - dT = time_hit - time_target - L_hit / c ( + time_offset)
+        // - ToF = [time_hit - time_target (+ time_offset)] / L_hit * L_0
 
         TString absPath = static_cast<TString>(getenv("repopath")) + "/data/";
 
@@ -78,33 +78,66 @@ public:
         // Reader
         TTreeReader reader(&chain);
         TTreeReaderArray<R3BNeulandHit> neuland(reader, "NeulandHits");
-
+        TTreeReaderArray<R3BLosHitData> los(reader, "LosHit");
         int ievt = 0;
-        const double Lref = 1557.0; // cm
-        const double c = 29.979;    // cm/ns
-        const double timeTarget = 7.423887;
 
-        double binTofMin = -50.;
-        double binTofMax = 50.;
-        double nBinsTof = 2200;
+        // If not offsets, set them to zero
+        if (!withOffsets)
+        {
+            fTofOffsets.clear();
+            fTofOffsets.resize(fNPaddles);
+        }
 
-        if (withOffsets)
+        double binTofMin, binTofMax;
+        int nBinsTof;
+        TString histogramTitle;
+        TString units;
+
+        if (TofOrDt)
         {
             binTofMin = 46.0;
             binTofMax = 55.0;
             nBinsTof = 200;
+            histogramTitle = "hToF";
+            units = "ToF vs Paddle;Paddle;ToF (ns)";
+        }
+        else
+        {
+            binTofMin = -50.;
+            binTofMax = 50.;
+            nBinsTof = 2200;
+            histogramTitle = "hdeltaTime";
+            units = "#Deltat vs Paddle;Paddle;#Deltat (ns)";
         }
 
-        /*
-        auto *hTofVsPad = new TH2D("hTofVsPad", "ToF vs Paddle;Paddle;ToF (ns)",
-                                   1300, -0.5, 1299.5,
-                                   200, 46.0, 55.0);
-        */
+        if (withOffsets)
+            histogramTitle += "Corrected";
 
-        auto *hTofVsPad = new TH2D("hTofVsPad", "ToF vs Paddle;Paddle;ToF (ns)",
+        histogramTitle += "VsPaddle";
+
+        auto *hTofVsPad = new TH2D(histogramTitle, units,
                                    1300, -0.5, 1299.5,
                                    nBinsTof, binTofMin, binTofMax);
 
+        // Calculate dT or ToF
+        const double Lref = 1557.0; // cm
+        const double c = 29.979;    // cm/ns
+        double timeTarget = 7.423887;
+
+        if (!withOffsets)
+            timeTarget = 0.;
+
+        auto computeTime = [=](double timeHit, double distHit, double timeOffset)
+        {
+            const double timeCorr = timeHit - timeTarget - timeOffset;
+
+            if (TofOrDt)
+                return timeCorr / distHit * Lref;
+            else
+                return timeCorr - distHit / c;
+        };
+
+        // Iterate over events
         while (reader.Next())
         {
             if ((++ievt % 100000) == 0)
@@ -112,29 +145,33 @@ public:
                 std::cout << 100.0 * ievt / chain.GetEntries() << " %\n";
             }
 
+            // Only 1 hit in LOS
+            if (los.GetSize() != 1)
+                continue;
+
             for (auto const &neu : neuland)
             {
 
-                double dToFOffset = 0;
+                const double time = computeTime(neu.GetT(), neu.GetPosition().Mag(), fTofOffsets[neu.GetPaddle() - 1]);
 
-                if (withOffsets)
+                if (!std::isnan(time) && neu.GetT() > 0)
                 {
-                    dToFOffset = (std::abs(fTofOffsets[neu.GetPaddle() - 1]) < 2.5) ? fTofOffsets[neu.GetPaddle() - 1] : 0;
+                    hTofVsPad->Fill(neu.GetPaddle() - 1, time);
                 }
-
-                const double timeDiff = neu.GetT() - timeTarget - neu.GetPosition().Mag() / c;
-
-                if (!std::isnan(timeDiff) && neu.GetT() > 0)
-                    hTofVsPad->Fill(neu.GetPaddle() - 1, timeDiff - dToFOffset);
             }
         }
 
         withOffsets ? hTofVsPaddlesCorr = hTofVsPad : hTofVsPaddles = hTofVsPad;
         TString titHist = withOffsets ? "hCorrected" : "hUncorrected";
 
+        if (TofOrDt)
+            titHist += "ToF";
+        else
+            titHist += "dT";
+
         auto *hToSave = hTofVsPad->Clone(titHist);
         fResults->cd();
-        hToSave->Write();
+        hToSave->Write("", TObject::kOverwrite);
     }
 
     // This method takes the corrected histogram from rootFile
@@ -148,6 +185,8 @@ public:
     // This method can be used to initialize the offsets
     void calculateOffsets()
     {
+
+        fTofOffsets.clear();
 
         TH1D *profile;
 

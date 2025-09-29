@@ -2,5 +2,5 @@
 
 void neulandAna()
 {
-    auto ana = std::make_unique<neulandAlignmentAnalysis>("results.root");
+    auto ana = std::make_unique<neulandAlignmentAnalysis>("resultsTest.root");
 }

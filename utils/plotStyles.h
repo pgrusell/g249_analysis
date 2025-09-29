@@ -7,7 +7,7 @@ inline void setOpenGL()
     gStyle->SetCanvasPreferGL(kTRUE);
 }
 
-inline void setHistogramStyle(TH1 *h, TString xTit, TString yTit, int color = kCyan)
+inline void setHistogramStyle(TH1 *h, TString xTit, TString yTit, int color = kCyan, double xmin = 0, double xmax = 0)
 {
 
     h->SetTitle("");
@@ -26,10 +26,16 @@ inline void setHistogramStyle(TH1 *h, TString xTit, TString yTit, int color = kC
 
     h->GetXaxis()->SetAxisColor(kBlack);
     h->GetYaxis()->SetAxisColor(kBlack);
+
+    if (xmin != 0 && xmax != 0)
+        h->GetXaxis()->SetRangeUser(xmin, xmax);
+
+    h->SetStats(0);
 }
 
-inline void setHistogramStyle(TH2 *h, TString xTit, TString yTit)
+inline void setHistogramStyle(TH2 *h, TString xTit, TString yTit, double xmin = 0, double xmax = 0, double ymin = 0, double ymax = 0)
 {
+    gStyle->SetPalette(kViridis);
     h->SetTitle("");
     h->GetXaxis()
         ->SetTitleOffset(1.1);
@@ -40,13 +46,20 @@ inline void setHistogramStyle(TH2 *h, TString xTit, TString yTit)
 
     h->GetXaxis()->SetAxisColor(kBlack);
     h->GetYaxis()->SetAxisColor(kBlack);
+
+    if (xmin != 0 && xmax != 0)
+        h->GetXaxis()->SetRangeUser(xmin, xmax);
+
+    if (ymin != 0 && ymax != 0)
+        h->GetYaxis()->SetRangeUser(ymin, ymax);
+
+    h->SetStats(0);
 }
 
-inline void setCanvasStyle(TCanvas *c)
+inline void setCanvasStyle(TCanvas *c, double rightMargin = 0.05)
 {
-    gStyle->SetPadRightMargin(0.05);
+    gStyle->SetPadRightMargin(rightMargin);
     gStyle->SetPadLeftMargin(0.15);
-    // gStyle->SetPadRightMargin(0.15);
     gStyle->SetCanvasPreferGL(kTRUE);
     gStyle->SetOptStat(0);
     c->SetLeftMargin(0.12);
@@ -54,6 +67,11 @@ inline void setCanvasStyle(TCanvas *c)
     c->SetTopMargin(0.08);
     c->SetFrameLineColor(kBlack);
     c->SetTicks(1, 1);
+
+    c->SetFillStyle(4000);
+    c->SetFillColor(0);
+    c->SetFrameFillStyle(4000);
+    c->SetFrameFillColor(0);
 }
 
 inline std::vector<Color_t> makeViridisColors(int n)
