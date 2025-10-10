@@ -81,7 +81,7 @@ void neuland_alignment(int mode = 3)
         auto neul = std::make_unique<neulandAlignment>("resultsTest.root", rootFile, 0);
         neul->calculateOffsets();
         // neul->buildHistogram(rootFile, true, 1);
-        neul->buildHistogram(rootFile, true, 1);
+        neul->buildHistogram(rootFile, true, true, 0);
 
         break;
     }

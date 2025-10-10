@@ -100,6 +100,47 @@ public:
         //  pr->Draw();
         c->SaveAs(path + "hTofFull.pdf");
         delete c;
+        delete pr;
+    }
+
+    std::pair<double, double> halfMaxRange(const TH1 *h)
+    {
+        const int binMax = h->GetMaximumBin();
+        const double yMax = h->GetBinContent(binMax);
+        const double half = 0.55 * yMax;
+
+        int iL = binMax;
+        while (iL > 1 && h->GetBinContent(iL) > half)
+            --iL;
+        double xL = h->GetXaxis()->GetXmin();
+        if (iL > 1)
+        {
+            const double y1 = h->GetBinContent(iL);
+            const double y2 = h->GetBinContent(iL + 1);
+            const double x1 = h->GetBinCenter(iL);
+            const double x2 = h->GetBinCenter(iL + 1);
+            const double dy = (y2 - y1);
+            xL = (std::abs(dy) > 0 ? x1 + (half - y1) * (x2 - x1) / dy : x1);
+        }
+
+        const int nBins = h->GetNbinsX();
+        int iR = binMax;
+        while (iR < nBins && h->GetBinContent(iR) > half)
+            ++iR;
+        double xR = h->GetXaxis()->GetXmax();
+        if (iR < nBins)
+        {
+            const double y1 = h->GetBinContent(iR - 1);
+            const double y2 = h->GetBinContent(iR);
+            const double x1 = h->GetBinCenter(iR - 1);
+            const double x2 = h->GetBinCenter(iR);
+            const double dy = (y2 - y1);
+            xR = (std::abs(dy) > 0 ? x1 + (half - y1) * (x2 - x1) / dy : x2);
+        }
+
+        if (xR < xL)
+            std::swap(xL, xR);
+        return {xL, xR};
     }
 
     void totalProfile(TString path)
@@ -109,6 +150,19 @@ public:
 
         setHistogramStyle(prCorrected, "ToF [ns]", "# counts", kCyan - 6);
         setHistogramStyle(prUncorrected, "ToF [ns]", "# counts", kOrange - 3);
+
+        auto [minC, maxC] = halfMaxRange(prCorrected);
+        auto [minU, maxU] = halfMaxRange(prUncorrected);
+
+        auto *celim = new TCanvas("celim", "celim", 800, 600);
+        auto fC = new TF1("fC_gauss", "gaus", minC, maxC);
+        prCorrected->Fit(fC, "R");
+        auto sigmaC = fC->GetParameter(2);
+
+        auto fU = new TF1("fU_gauss", "gaus", minU, maxU);
+        prUncorrected->Fit(fU, "R");
+        auto sigmaU = fU->GetParameter(2);
+        delete celim;
 
         auto *c5 = new TCanvas("c5", "hProfTotBoth", 800, 600);
         setCanvasStyle(c5);
@@ -120,13 +174,48 @@ public:
         leg->SetTextSize(0.04);
         leg->SetBorderSize(0);
         leg->SetFillStyle(0);
-        leg->AddEntry(prCorrected, "new params (FWHM = 0.6 ns)", "l");
-        leg->AddEntry(prUncorrected, "old params (FWHM = 0.8 ns)", "l");
+        leg->AddEntry(prCorrected, Form("new params (#sigma = %.f ps)", sigmaC * 1000), "l");
+        leg->AddEntry(prUncorrected, Form("old params (#sigma = %.f ps)", sigmaU * 1000), "l");
         leg->Draw();
 
         c5->SaveAs(path + "hProfTot.pdf");
-
         delete c5;
+
+        auto *c5_2 = new TCanvas("c5_2", "hProfTotSingle", 800, 600);
+        c5_2->cd();
+        setCanvasStyle(c5_2);
+
+        prCorrected->GetXaxis()->SetRangeUser(51, 54);
+        prCorrected->Draw();
+
+        // ---- Añadir el fit, rango y FWHM ----
+        auto [xL, xR] = halfMaxRange(prCorrected);
+        auto fC1 = new TF1("fC1_gauss", "gaus", xL, xR);
+        prCorrected->Fit(fC1, "RQ");
+
+        // Calcular media altura y dibujar la línea
+        const double yHalf = 0.5 * prCorrected->GetBinContent(prCorrected->GetMaximumBin());
+
+        auto fwhmArrow = new TArrow(xL, yHalf * 1.02, xR, yHalf * 1.02, 0.02, "<>");
+        fwhmArrow->SetLineWidth(2);
+        fwhmArrow->SetLineColor(kRed + 1);
+        fwhmArrow->Draw();
+
+        const double fwhm_geom = xR - xL;
+        const double sigma = fC->GetParameter(2);
+        const double fwhm_gauss = 2.354820045 * sigma;
+
+        TLatex lt;
+        lt.SetTextAlign(21);
+        lt.SetTextSize(0.035);
+        lt.SetTextColor(kRed + 1);
+        lt.DrawLatex(0.5 * (xL + xR), yHalf * 1.10,
+                     Form("%.f ps", fwhm_gauss * 1000));
+
+        c5_2->SaveAs(path + "hProfTotSingle.pdf");
+        delete c5_2;
+        delete fwhmArrow;
+        delete leg;
     }
 
     void checkAlignment(TH2D *&hInit, TString title, int nProfiles = 5, double xmin = -10, double xmax = -6, TString lab = "#Deltat [ns]", bool single = false)
@@ -226,32 +315,31 @@ public:
             auto f1 = new TF1("f_gauss", "gaus", 0, 0);
             f1->SetRange(min, max);
 
-            profiles[k].first->Fit(f1, "R");
+            profiles[k].first->Fit(f1, "Rh");
 
             auto leg = new TLegend(0.8, 0.85, 0.97, 0.95);
 
             TString muStr = Form("#mu = %.2f ns", f1->GetParameter(1));
             TString sigmaStr = Form("#sigma = %.2f ns", f1->GetParameter(2));
 
-            leg->AddEntry((TObject *)0, muStr, "");    // (TObject*)0 = texto sin símbolo
-            leg->AddEntry((TObject *)0, sigmaStr, ""); // segunda línea
+            leg->AddEntry((TObject *)0, muStr, "");
+            leg->AddEntry((TObject *)0, sigmaStr, "");
             leg->Draw();
 
             c7->SaveAs(titleOne);
 
             delete c7;
+            delete leg;
         }
     }
 
     void compareTofFull(TString path, double m1 = -8.30623, double m2 = 0.0040615, double obj = 51.95, double ttar = 7.423887)
     {
-        // Proyecciones (histos 1D)
         hUncorrecteddT->GetYaxis()->SetRangeUser(-50, 50);
         hCorrecteddT->GetYaxis()->SetRangeUser(-50, 50);
         auto *prUncorr = (TH1D *)hUncorrecteddT->ProjectionY("prUncorr");
         auto *prCorr = (TH1D *)hCorrecteddT->ProjectionY("prCorr");
 
-        // Si no pasas m1/m2, usa la media de las proyecciones
         if (std::isnan(m1))
             m1 = prUncorr->GetMean();
         if (std::isnan(m2))
@@ -269,7 +357,7 @@ public:
         hUncorrShifted->Sumw2();
         hCorrShifted->Sumw2();
 
-        hUncorrShifted->Draw();
+        // hUncorrShifted->Draw();
 
         for (int i = 1; i <= prUncorr->GetNbinsX(); ++i)
         {
@@ -286,7 +374,6 @@ public:
                 hCorrShifted->Fill(x + shift2, y);
         }
 
-        // Estilo y dibujo
         setOpenGL();
         auto *c = new TCanvas("cf", "ToF compare", 800, 600);
         setCanvasStyle(c);
@@ -304,7 +391,8 @@ public:
         leg->Draw();
 
         c->SaveAs(path + "ToFCorrectedVsUncorrected.pdf");
-        // delete c;
+        delete c;
+        delete leg;
     }
 
 private:

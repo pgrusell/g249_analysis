@@ -46,6 +46,10 @@ public:
         {
             buildHistogram(dataFile, false, TofOrDt);
         }
+
+        hToFVsEnergy = new TH2D("hToFVsEnergy", "hToFVsEnergy:E[chn]:ToF[ns]", 1000, 0, 200, 1000, 40, 100);
+        hXYPeak1 = new TH2D("hXYPeak1", "hXYPeak1;X [cm];Y [cm]", 1000, -250, 100, 1000, -250, 100);
+        hXYPeak2 = new TH2D("hXYPeak2", "hXYPeak2;X [cm];Y [cm]", 1000, -250, 100, 1000, -250, 100);
     }
 
     ~neulandAlignment()
@@ -161,6 +165,7 @@ public:
             if (los.GetSize() != 1)
                 continue;
 
+            /*
             for (auto const &neu : neuland)
             {
 
@@ -168,8 +173,62 @@ public:
 
                 if (!std::isnan(time) && neu.GetT() > 0)
                 {
+
+                    const double energy = neu.GetE();
+                    double xPos = neu.GetPosition().x();
+                    double yPos = neu.GetPosition().y();
+
+                    // std::cout << energy << " " << xPos << " " << yPos << std::endl;
+
+                    // Identify the coordinate measured by the bar
+                    if (2 * xPos == static_cast<int>(2 * xPos))
+                        xPos = gRandom->Uniform(xPos - 2.5, xPos + 2.5);
+
+                    if (2 * yPos == static_cast<int>(2 * yPos))
+                        yPos = gRandom->Uniform(yPos - 2.5, yPos + 2.5);
+
                     hTofVsPad->Fill(neu.GetPaddle() - 1, time);
+                    hToFVsEnergy->Fill(energy, time);
+
+                    if ((time > 51.5) && (time < 52.4))
+                        hXYPeak1->Fill(xPos, yPos);
+
+                    if ((time > 52.4) && (time < 52.9))
+                        hXYPeak2->Fill(xPos, yPos);
                 }
+            }
+            */
+
+            if (neuland.GetSize() == 0)
+                continue;
+
+            auto neu = neuland[0];
+            const double time = computeTime(neu.GetT(), neu.GetPosition().Mag(), fTofOffsets[neu.GetPaddle() - 1]);
+
+            if (!std::isnan(time) && neu.GetT() > 0)
+            {
+
+                const double energy = neu.GetE();
+                double xPos = neu.GetPosition().x();
+                double yPos = neu.GetPosition().y();
+
+                // std::cout << energy << " " << xPos << " " << yPos << std::endl;
+
+                // Identify the coordinate measured by the bar
+                if (2 * xPos == static_cast<int>(2 * xPos))
+                    xPos = gRandom->Uniform(xPos - 2.5, xPos + 2.5);
+
+                if (2 * yPos == static_cast<int>(2 * yPos))
+                    yPos = gRandom->Uniform(yPos - 2.5, yPos + 2.5);
+
+                hTofVsPad->Fill(neu.GetPaddle() - 1, time);
+                hToFVsEnergy->Fill(energy, time);
+
+                if ((time > 51.5) && (time < 52.4))
+                    hXYPeak1->Fill(xPos, yPos);
+
+                if ((time > 52.4) && (time < 52.9))
+                    hXYPeak2->Fill(xPos, yPos);
             }
         }
 
@@ -179,14 +238,20 @@ public:
         if (TofOrDt)
         {
             if (full)
-                titHits += "_full";
+                titHist += "_full";
+
             titHist += "ToF";
-            else titHist += "dT";
         }
+        else
+            titHist += "dT";
 
         auto *hToSave = hTofVsPad->Clone(titHist);
         fResults->cd();
         hToSave->Write("", TObject::kOverwrite);
+        hTofVsPad->Write();
+        hToFVsEnergy->Write();
+        hXYPeak1->Write();
+        hXYPeak2->Write();
     }
 
     // This method takes the corrected histogram from rootFile
@@ -244,7 +309,7 @@ public:
         }
     }
 
-     // Method to fit the particular profile
+    // Method to fit the particular profile
     void calculateOffsetFromProjection(TH1D *profile)
     {
         if (profile->Integral() < 1)
@@ -271,8 +336,6 @@ public:
         }
 
         double center = profile->GetBinCenter(maxBin);
-
-        // double center = profile->GetBinCenter(profile->GetMaximumBin());
         double min = center - 0.5;
         double max = center + 0.5;
 
@@ -292,6 +355,9 @@ private:
     TH2D *hTofVsPaddles = nullptr;
     TH2D *hTofVsPaddlesCorr = nullptr;
     TH2D *hOffsets = nullptr;
+    TH2D *hToFVsEnergy = nullptr;
+    TH2D *hXYPeak1 = nullptr;
+    TH2D *hXYPeak2 = nullptr;
     std::vector<double> fTofOffsets;
     std::vector<std::vector<double>> fFitPars;
     TFile *fResults = nullptr;
