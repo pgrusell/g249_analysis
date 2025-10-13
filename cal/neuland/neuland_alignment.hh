@@ -22,7 +22,7 @@ public:
         // Absolute path of the file
         TString histFilePath = static_cast<TString>(getenv("repopath")) + "/results/cal/" + hitsFile;
 
-        fResults = new TFile("resultsTest.root", "UPDATE");
+        fResults = new TFile(static_cast<TString>(getenv("repopath")) + "/results/cal/resultsTest.root", "UPDATE");
 
         // If the dataFile contains the histograms get it
         if (hitsFile != "")
@@ -244,7 +244,7 @@ public:
         }
     }
 
-     // Method to fit the particular profile
+    // Method to fit the particular profile
     void calculateOffsetFromProjection(TH1D *profile)
     {
         if (profile->Integral() < 1)
