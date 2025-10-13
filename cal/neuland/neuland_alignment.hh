@@ -22,7 +22,7 @@ public:
         // Absolute path of the file
         TString histFilePath = static_cast<TString>(getenv("repopath")) + "/results/cal/" + hitsFile;
 
-        fResults = new TFile("resultsTest.root", "UPDATE");
+        fResults = new TFile(static_cast<TString>(getenv("repopath")) + "/results/cal/resultsTest.root", "UPDATE");
 
         // If the dataFile contains the histograms get it
         if (hitsFile != "")
@@ -220,6 +220,9 @@ public:
 
                 if (2 * yPos == static_cast<int>(2 * yPos))
                     yPos = gRandom->Uniform(yPos - 2.5, yPos + 2.5);
+
+                if (energy < 6.)
+                    continue;
 
                 hTofVsPad->Fill(neu.GetPaddle() - 1, time);
                 hToFVsEnergy->Fill(energy, time);
