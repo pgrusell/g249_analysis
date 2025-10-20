@@ -16,16 +16,16 @@
 class neulandAlignment
 {
 public:
-    neulandAlignment(TString hitsFile = "", std::vector<TString> dataFile = {}, int TofOrDt = 1)
+    neulandAlignment(TString histFile = "", std::vector<TString> dataFile = {}, int TofOrDt = 1)
     {
 
         // Absolute path of the file
-        TString histFilePath = static_cast<TString>(getenv("repopath")) + "/results/cal/" + hitsFile;
+        TString histFilePath = static_cast<TString>(getenv("repopath")) + "/results/cal/" + histFile;
 
         fResults = new TFile(static_cast<TString>(getenv("repopath")) + "/results/cal/resultsTest.root", "UPDATE");
 
         // If the dataFile contains the histograms get it
-        if (hitsFile != "")
+        if (histFile != "")
         {
 
             // auto *histDataFile = new TFile(histFilePath, "READ");
@@ -179,10 +179,11 @@ public:
         if (TofOrDt)
         {
             if (full)
-                titHits += "_full";
+                titHist += "_full";
             titHist += "ToF";
-            else titHist += "dT";
         }
+        else
+            titHist += "dT";
 
         auto *hToSave = hTofVsPad->Clone(titHist);
         fResults->cd();

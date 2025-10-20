@@ -39,12 +39,16 @@ void neuland_alignment(int mode = 3)
                          true);
 
     neul->checkAlignment();
-    */
+
+
 
     std::vector<TString> rootFile = {
         "/nucl_lustre/g249/root_neuland/g249_all_det_offline_20250828_210751.root",
         "/nucl_lustre/g249/root_neuland/g249_all_det_offline_20250828_210751_1.root",
         "/nucl_lustre/g249/root_neuland/g249_all_det_offline_20250828_210751_2.root"};
+    */
+
+    std::vector<TString> rootFile = {"/nucl_lustre/pablogrusell/g249/root_files/g249_all_det_offline_0001_20251014_105349.root"};
 
     switch (mode)
     {
@@ -78,10 +82,10 @@ void neuland_alignment(int mode = 3)
     case 3:
     {
 
-        auto neul = std::make_unique<neulandAlignment>("resultsTest3.root", rootFile, 0);
+        auto neul = std::make_unique<neulandAlignment>("resultsTest4.root", rootFile, 0);
         neul->calculateOffsets();
         // neul->buildHistogram(rootFile, true, 1);
-        neul->buildHistogram(rootFile, true, 1);
+        neul->buildHistogram(rootFile, false, 1);
 
         break;
     }
