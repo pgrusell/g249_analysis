@@ -344,8 +344,6 @@ private:
     std::vector<TH2D *> chargeCorrelationFoots;
     std::vector<std::vector<TH2D *>> FootVsTofdCharge;
     std::vector<TH2D *> FootpositionVsCharge;
-
-    // NEW: contenedores nuevos
     std::vector<std::vector<TH2D *>> energyVsEtaAsic;                 // [det][asic]
     std::vector<std::vector<std::vector<TH2D *>>> energyVsEtaAsicLos; // [det][asic][losBin]
 };
