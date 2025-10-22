@@ -104,19 +104,25 @@ On the other hand, this macro also represent the charge measured in the FOOTs (a
 
 \subsection{NeuLAND}
 
+For NeuLAND, the calibration consists of calculating the offsets of the time-of-flight of every paddle. To to this, the idea is to align the $\gamma$-peak with the nominal value (preliminarily it was set to $51.94$ ns, even though it has to be checked).
+
+With the calibration used during the experiment, we got the results shown
+
+
+
 \section{Simulation}
 
-\subsection{Neutron emission decay}
+\subsection{Neutron decay}
 
-Here we simulate the decay of the \textsuperscript{24}O, produced in (p,2p) reaction, by neutron emission. The idea is to use the generator \href{https://github.com/pgrusell/R3BNeutronDecayGenerator}{\texttt{R3BNeutronGenerator}}. There, we will input the mass and charge of the fragment produced in the de-excitation via neutron emission of the incoming fragment, the kinetic energy per nucleon in the lab frame of the fragment, $\sim 650$ MeV, the number of emitted neutrons and the energy and width of the resonance that we want to simulate.
+Here we simulate the decay of the \textsuperscript{24}O, produced in (p,2p) reaction, by neutron emission. The idea is to use the generator \href{https://github.com/pgrusell/R3BNeutronDecayGenerator}{\texttt{R3BNeutronGenerator}}. There, we will input the mass and charge of the fragment produced in the de-excitation via neutron emission of the incoming fragment, the kinetic energy per nucleon in the lab frame of the fragment, $\sim 650$ MeV, the number of emitted neutrons and the energy and width of the resonance that we want to simulate. This generator allows us to do different things:
 
 \begin{figure}[htbp]
     \centering
     \begin{minipage}[c]{0.55\textwidth}
-        The first idea is to reproduce the same $E_{\text{rel}}$ spectra as measured in \cite{Hoffman2009_O24}.
+        The first option is to generate resonances. For instance we can try to reproduce the same $E_{\text{rel}}$ spectrum as measured in \cite{Hoffman2009_O24}.
         There, \textsuperscript{24}O excited states were populated via knock-out reactions from a primary beam of
         \textsuperscript{26}F and they measured, in coincidence, one neutron and the outgoing \textsuperscript{22}O.
-        The result of reconstructing the $E_{\text{rel}}$ spectra (see \cref{fig:sim_nndecay_rel_energy}), shows to peaks corresponding to the transitions shown in \cref{fig:sim_nndecay_levels}. Although in our experiment we would expect more peaks, since the energy of our beam is higher, we would try to simulate the same spectra.
+        The result of reconstructing the $E_{\text{rel}}$ spectrum (see \cref{fig:sim_nndecay_rel_energy}), shows to peaks corresponding to the transitions shown in \cref{fig:sim_nndecay_levels}. Although in our experiment we would expect more peaks, since the energy of our beam is higher, we would try to simulate the same spectrum.
     \end{minipage}\hfill
     \begin{minipage}[c]{0.4\textwidth}
         \centering
@@ -227,7 +233,7 @@ Here we simulate the decay of the \textsuperscript{24}O, produced in (p,2p) reac
 
 \end{figure}
 
-Since in that experiment they were able only to measure one proton during the hole deexcitation process, three possible scenarios are available, \textsuperscript{24}O\textsuperscript{*} decaying via one neutron emission follow by the emssion of a second neutron emission until reaching the \textsuperscript{22}O. Measuring any of the neutron would result in either blue or read peaks of \cref{fig:sim_nndecay_rel_energy}. However, there are still other options, the most obvious one is the simultaneous emission of two neutrons by the \textsuperscript{24}O\textsuperscript{*}, decaying directly to \textsuperscript{22}O without stopping in the resonant blue level and thus, not contributing to the previous resonant peaks. This case is not going to be explored for the moment.
+Since in that experiment they were able only to measure one proton during the whole de-excitation process, three possible scenarios are available, \textsuperscript{24}O\textsuperscript{*} decaying via one neutron emission follow by the emission of a second neutron emission until reaching the \textsuperscript{22}O. Measuring any of the neutron would result in either blue or read peaks of \cref{fig:sim_nndecay_rel_energy}. However, there are still other options, the most obvious one is the simultaneous emission of two neutrons by the \textsuperscript{24}O\textsuperscript{*}, decaying directly to \textsuperscript{22}O without stopping in the resonant blue level and thus, not contributing to the previous resonant peaks. This case is not going to be explored for the moment.
 
 In order to simulate these resonances we will use the neutron generator to explore the following reactions:
 
@@ -240,7 +246,7 @@ In order to simulate these resonances we will use the neutron generator to explo
     \label{eq:sim_nndecay_23O_22On}
 \end{equation}
 
-From the results of \cite{Hoffman2009_O24}, we know that \cref{eq:sim_nndecay_24O_23On}, corresponds to a resonance of $\sim 0.6$ MeV, while \cref{eq:sim_nndecay_23O_22On}, to $0.045(2)$ MeV. For both cases we can simply consider the kinetic energy of the recoil fragment as the energy of the \textsuperscript{25}F beam ($\sim 650$ MeV/u). Therefore,running the generator with the following configuration:
+From the results of \cite{Hoffman2009_O24}, we know that \cref{eq:sim_nndecay_24O_23On}, corresponds to a resonance of $\sim 0.6$ MeV, while \cref{eq:sim_nndecay_23O_22On}, to $0.045(2)$ MeV. For both cases we can simply consider the kinetic energy of the recoil fragment as the energy of the \textsuperscript{25}F beam ($\sim 650$ MeV/u). Therefore, running the generator with the following configuration:
 
 ~
 
@@ -249,7 +255,16 @@ $ root -l 'NeutronDecayGenerator.C("O24_O23n", 10000, 23, 8, 650., 0.6, 0.25)'
 $ root -l 'NeutronDecayGenerator.C("O23_O22n", 10000, 22, 8, 650., 0.045, 0.02)'
 \end{lstlisting}
 
-This will generate two different \texttt{.out} files that can be separately read by the simulation class to generate the corresponding events. To run proceed in this way we can simply use the messenger \texttt{O24\_2n\_decay.mac}, this will generate one rootfile per resonance that can be analyzed.
+will generate two different \texttt{.out} files that can be separately read by the simulation class to generate the corresponding events. To run proceed in this way we can simply use the messenger \texttt{O24\_2n\_decay.mac}, this will generate one rootfile per resonance that can be analyzed.
+
+On the other hand, if we want to populate a wider range of energy, instead of a single resonance. We can do as follows:
+
+~
+\begin{lstlisting}[style=bash]
+$ root -l 'NeutronDecayGenerator.C("O24_O23n", 10000, 23, 8, 650., eMax, -1)' 
+\end{lstlisting}
+
+This creates a spectrum from 0 to \texttt{eMax}, which can be usefull to study neutron efficiencies as will be explained in the analysis section.
 
 \section{Analysis}
 
