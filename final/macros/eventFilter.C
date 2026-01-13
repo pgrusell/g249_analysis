@@ -107,7 +107,7 @@ struct NFirst
 
 ////////// MAIN FUNCTION ///////////
 
-void eventFilter(TString setting = "", TString reaction = "", bool test = false, bool append = false)
+void eventFilter(std::string setting = "", TString reaction = "", bool test = false, bool append = false)
 {
     ///////// Select the setting /////////
     const std::string listTxt =
@@ -199,21 +199,21 @@ void eventFilter(TString setting = "", TString reaction = "", bool test = false,
 
     ROOT::RDataFrame df("evt", files);
 
-    // Select events with full data
-    auto base = df
-                    .Filter([](TClonesArray &f)
-                            { return f.GetEntriesFast() > 0; }, {"FrsData"})
-                    .Filter([](TClonesArray &m)
-                            { return m.GetEntriesFast() > 0; }, {"FragmentMDFTrack"})
-                    .Filter([](TClonesArray &it)
-                            { return it.GetEntriesFast() > 0; }, {"IncomingTrackFoot"})
-                    .Filter([](TClonesArray &c)
-                            { return c.GetEntriesFast() >= 2; }, {"CalifaClusterData"});
+    // Select
+    ROOT::RDF::RNode base = df
+                                .Filter([](TClonesArray &f)
+                                        { return f.GetEntriesFast() > 0; }, {"FrsData"})
+                                .Filter([](TClonesArray &m)
+                                        { return m.GetEntriesFast() > 0; }, {"FragmentMDFTrack"})
+                                .Filter([](TClonesArray &it)
+                                        { return it.GetEntriesFast() > 0; }, {"IncomingTrackFoot"})
+                                .Filter([](TClonesArray &c)
+                                        { return c.GetEntriesFast() >= 2; }, {"CalifaClusterData"});
 
-    ROOT::RDF::RNode df_cut = hasNeutrons
-                                  ? base.Filter([](TClonesArray &n)
-                                                { return n.GetEntriesFast() > 0; }, {"NeulandHits"})
-                                  : base;
+    ROOT::RDF::RNode df_cut = base;
+    if (hasNeutrons)
+        df_cut = df_cut.Filter([](TClonesArray &n)
+                               { return n.GetEntriesFast() > 0; }, {"NeulandHits"});
 
     // Select the incoming in the FRS
     auto df_frs = df_cut
@@ -313,7 +313,8 @@ void eventFilter(TString setting = "", TString reaction = "", bool test = false,
         {"AoQ_frag", "Z_frag_est"});
 
     // Nuetron variables (if any)
-    auto df_p4n = df_frag_filtered;
+    ROOT::RDF::RNode df_p4n = df_frag_filtered;
+
     if (hasNeutrons)
     {
         // Select the first neutron in Neuland
@@ -558,7 +559,7 @@ void eventFilter(TString setting = "", TString reaction = "", bool test = false,
             "pz_in"};
     }
 
-    df_out.Snapshot("ErelTree", outFile, cols);
+    df_out.Snapshot("FilterDataTree", outFile, cols);
 
     std::cout << "\n[OK] TTree saved in: " << outFile << "\n";
 
