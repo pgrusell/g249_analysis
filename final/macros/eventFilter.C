@@ -109,6 +109,9 @@ struct NFirst
 
 void eventFilter(std::string setting = "", TString reaction = "", bool test = false, bool append = false)
 {
+
+    ROOT::EnableImplicitMT(25);
+
     ///////// Select the setting /////////
     const std::string listTxt =
         std::string(getenv("repopath")) + "/final/settings/" + setting;
