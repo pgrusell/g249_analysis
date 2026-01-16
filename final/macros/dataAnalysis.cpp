@@ -245,12 +245,13 @@ void DataAnalysis::getData(bool called)
         // P4 of the fragment
         fx_frag = px_frag / pz_frag;
         fy_frag = py_frag / pz_frag;
+        fz_frag = 1.0;
 
         Double_t gamma_frag = 1.0 / std::sqrt(1.0 - beta_frag * beta_frag);
         Double_t m_f = M_frag * 1000.;
 
-        // TVector3 u_frag(fx_frag, fy_frag, fz_frag);
-        TVector3 u_frag(px_frag, py_frag, pz_frag);
+        TVector3 u_frag(fx_frag, fy_frag, 1.);
+        // TVector3 u_frag(px_frag, py_frag, pz_frag);
         u_frag = u_frag.Unit();
         Double_t p_frag_lab = gamma_frag * m_f * beta_frag;
         TVector3 pvec_frag_lab = u_frag * p_frag_lab;
@@ -259,9 +260,11 @@ void DataAnalysis::getData(bool called)
         P4_frag_lab.SetPxPyPzE(pvec_frag_lab.X(), pvec_frag_lab.Y(), pvec_frag_lab.Z(),
                                gamma_frag * m_f);
 
+        /*
         px_frag = pvec_frag_lab.X();
         py_frag = pvec_frag_lab.Y();
         pz_frag = pvec_frag_lab.Z();
+        */
 
         // P4 of the incoming
         TVector3 u_proj(px_proj, py_proj, pz_proj);
@@ -269,6 +272,9 @@ void DataAnalysis::getData(bool called)
         double beta_proj_mag = beta_proj;
         double gamma_proj = 1.0 / std::sqrt(1.0 - beta_proj_mag * beta_proj_mag);
         double p_proj_mag = gamma_proj * Mproj_GeV * beta_proj_mag;
+
+        std::cout << beta_proj_mag << " " << Mproj_GeV << " " << p_frag_lab << std::endl;
+
         TVector3 p_proj_lab = u_proj * p_proj_mag;
         double E_proj_lab = gamma_proj * Mproj_GeV;
 
@@ -289,7 +295,7 @@ void DataAnalysis::getData(bool called)
 
             Double_t gamma_neu = 1.0 / std::sqrt(1.0 - beta_neu * beta_neu);
 
-            TVector3 u_neu(dx_neu, dy_neu, dz_neu);
+            TVector3 u_neu(dx_neu, dy_neu, 1.);
             u_neu = u_neu.Unit();
             Double_t p_neu_lab = gamma_neu * m_neut * beta_neu;
 

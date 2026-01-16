@@ -164,8 +164,8 @@ void eventFilter(std::string setting = "", TString reaction = "", bool test = fa
 
     if (reaction == "25F24O")
     {
-        SEL_AOQ_OUT_MIN = 2.8;
-        SEL_AOQ_OUT_MAX = 2.88;
+        SEL_AOQ_OUT_MIN = 2.9;
+        SEL_AOQ_OUT_MAX = 3.;
         SEL_AOQ_IN_MIN = 2.77;
         SEL_AOQ_IN_MAX = 2.79;
 
