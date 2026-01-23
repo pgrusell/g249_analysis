@@ -175,7 +175,7 @@ void eventFilter(std::string setting = "", TString reaction = "", bool test = fa
     }
 
     if (test)
-        outFileName += "_test";
+        outFileName += "_test2";
 
     outFileName += ".root";
 

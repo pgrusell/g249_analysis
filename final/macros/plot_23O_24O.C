@@ -1,19 +1,3 @@
-// ===============================================================
-//  plot_23O_24O_fromKinTree.C
-//
-//  Lee los ROOT producidos por DataAnalysis::getData(true),
-//  que guardan un TTree llamado "KinTree".
-//
-//  Para 24O (hasNeutrons=false): el sistema "sys" = fragmento
-//  Para 23O+n (hasNeutrons=true): el sistema "sys" = fragmento + n
-//
-//  Variables recomendadas (ya calculadas en la clase):
-//    - Erel (solo si hay neutrones)
-//    - px_rf_rot, py_rf_rot, pz_rf_rot  (en CM del proyectil y ejes rotados)
-//    - pT, pL  (pT = sqrt(px_rf_rot^2+py_rf_rot^2), pL = pz_rf_rot)
-//    - califa_opa
-// ===============================================================
-
 #include <TFile.h>
 #include <TTree.h>
 #include <TH1D.h>
@@ -106,8 +90,7 @@ void plot_23O_24O()
     hErel23->Draw("HIST");
 
     // ===========================================================
-    // 2) px, py en CM rotado: 23O+n
-    //    (equivalente “limpio” a px_23O1n_CM / py_23O1n_CM)
+    // 1) px, py in rotated
     // ===========================================================
     TH1D *hPx23 = new TH1D("hPx23", "^{23}O+n (CM rot);p_{x} [MeV/c];A.U.",
                            100, -500, 500);
@@ -265,9 +248,9 @@ void plot_23O_24O()
     // 7) Comparación pL (YA guardado como pL)
     // ===========================================================
     TH1D *hPl24_v = new TH1D("hPl24_v", "p_{L} (CM );p_{L} [MeV/c];A.U.",
-                             50, -2000, 2000);
+                             50, -1000, 1000);
     TH1D *hPl23_v = new TH1D("hPl23_v", "p_{L} (CM );p_{L} [MeV/c];A.U.",
-                             50, -2000, 2000);
+                             50, -1000, 1000);
 
     t24->Draw("pz_sys_CM>>hPl24_v", cond, "goff");
     t23->Draw("pz_sys_CM>>hPl23_v", cond, "goff");
