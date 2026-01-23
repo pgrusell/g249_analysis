@@ -250,9 +250,20 @@ void DataAnalysis::getData(bool called)
         Double_t gamma_frag = 1.0 / std::sqrt(1.0 - beta_frag * beta_frag);
         Double_t m_f = M_frag * 1000.;
 
-        TVector3 u_frag(fx_frag, fy_frag, 1.);
-        // TVector3 u_frag(px_frag, py_frag, pz_frag);
+        // TVector3 u_frag(fx_frag, fy_frag, 1.);
+        TVector3 u_frag(px_frag, py_frag, pz_frag);
+
         u_frag = u_frag.Unit();
+
+        /*
+        std::cout << "Fragment \n";
+        std::cout << u_frag.X() << " " << fx_frag << std::endl;
+        std::cout << u_frag.Y() << " " << fy_frag << std::endl;
+        std::cout << u_frag.Z() << " " << 1. << std::endl;
+
+        std::cout << "====\n";
+        */
+
         Double_t p_frag_lab = gamma_frag * m_f * beta_frag;
         TVector3 pvec_frag_lab = u_frag * p_frag_lab;
         TLorentzVector P4_frag_lab;
@@ -272,8 +283,6 @@ void DataAnalysis::getData(bool called)
         double beta_proj_mag = beta_proj;
         double gamma_proj = 1.0 / std::sqrt(1.0 - beta_proj_mag * beta_proj_mag);
         double p_proj_mag = gamma_proj * Mproj_GeV * beta_proj_mag;
-
-        std::cout << beta_proj_mag << " " << Mproj_GeV << " " << p_frag_lab << std::endl;
 
         TVector3 p_proj_lab = u_proj * p_proj_mag;
         double E_proj_lab = gamma_proj * Mproj_GeV;
@@ -295,8 +304,25 @@ void DataAnalysis::getData(bool called)
 
             Double_t gamma_neu = 1.0 / std::sqrt(1.0 - beta_neu * beta_neu);
 
-            TVector3 u_neu(dx_neu, dy_neu, 1.);
+            // TVector3 u_neu(dx_neu, dy_neu, 1.);
+            TVector3 u_neu(px_neu, py_neu, pz_neu);
+
+            std::cout << "Neutron \n";
+            std::cout << px_neu << " " << dx_neu << std::endl;
+            std::cout << py_neu << " " << dy_neu << std::endl;
+            std::cout << pz_neu << " " << 1. << std::endl;
+
+            std::cout << "====\n";
+
             u_neu = u_neu.Unit();
+
+            std::cout << "Neutron \n";
+            std::cout << u_neu.X() << " " << dx_neu << std::endl;
+            std::cout << u_neu.Y() << " " << dy_neu << std::endl;
+            std::cout << u_neu.Z() << " " << 1. << std::endl;
+
+            std::cout << "====\n";
+
             Double_t p_neu_lab = gamma_neu * m_neut * beta_neu;
 
             TVector3 pvec_neu_lab = u_neu * p_neu_lab;
@@ -375,7 +401,6 @@ void DataAnalysis::matchBeta()
 
     for (int i = 0; i < number; i++)
     {
-        std::cout << i << std::endl;
         const double dBeta = dBeta0 + i * dPaso;
         fBetaMatchValue = dBeta;
         fErel->Reset();
