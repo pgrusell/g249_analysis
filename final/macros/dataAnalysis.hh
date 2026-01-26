@@ -12,7 +12,7 @@ public:
     void matchBeta();
 
 private:
-    static constexpr double m_neut = 939.565;                                  // MeV
+    static constexpr double m_neut = 0.939565;                                 // MeV
     static constexpr double dalt = 931.494;                                    // MeV
     static constexpr double Mproj_GeV = (25.0 * 0.93149410242 - 9 * 0.000511); // TODO: read this from the eventFilter tree
 
