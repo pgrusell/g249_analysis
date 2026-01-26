@@ -16,5 +16,5 @@ Once we have the specific filtered data, it's time to start with the data analys
 
 - ****
 
-- **Beta matching**: In principle, the neutron and the fragment should have the same beta, however, due to energy losses and intrinsec uncertainties on the MDF, the momentum of the fragment is biased. To solve this problem, we need to match the beta of the neutron and the beta of the fragment through different methods. This is  
+- **Beta matching**: In principle, the neutron and the fragment should have the same beta, however, due to energy losses and intrinsic uncertainties on the MDF, the momentum of the fragment is biased. To solve this problem, we need to match the beta of the neutron and the beta of the fragment through different methods. This is  
 
