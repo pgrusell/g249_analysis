@@ -309,8 +309,8 @@ void plot_23O_24O()
                               50, 0, 0.300);
 
     t23->Draw("pT>>hPt23_p1", cond + " && Erel*1000 < 1.8", "goff");
-    t23->Draw("pT>>hPt23_p2", cond + " && Erel*1000 > 2.1 && Erel < 4", "goff");
-    t23->Draw("pT>>hPt23_p3", cond + " && Erel*1000 > 5.0 && Erel < 7.0", "goff");
+    t23->Draw("pT>>hPt23_p2", cond + " && Erel*1000 > 2.1 && Erel*1000 < 4.0", "goff");
+    t23->Draw("pT>>hPt23_p3", cond + " && Erel*1000 > 5.0 && Erel*1000 < 7.0", "goff");
 
     Normalize(hPt23_p1);
     Normalize(hPt23_p2);
