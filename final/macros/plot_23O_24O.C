@@ -80,7 +80,7 @@ void plot_23O_24O()
                              "E_{rel} (^{23}O+n);E_{rel} [MeV];A.U.",
                              80, 0, 10);
 
-    t23->Draw("Erel>>hErel23", cond, "goff");
+    t23->Draw("Erel*1000>>hErel23", cond, "goff");
 
     hErel23->SetLineColor(col1n);
     hErel23->SetFillColorAlpha(col1n, 0.3);
@@ -93,9 +93,9 @@ void plot_23O_24O()
     // 1) px, py in rotated
     // ===========================================================
     TH1D *hPx23 = new TH1D("hPx23", "^{23}O+n (CM rot);p_{x} [MeV/c];A.U.",
-                           100, -500, 500);
+                           100, -0.5, 0.500);
     TH1D *hPy23 = new TH1D("hPy23", "^{23}O+n (CM rot);p_{y} [MeV/c];A.U.",
-                           100, -500, 500);
+                           100, -0.500, 0.500);
 
     t23->Draw("px_rf_rot>>hPx23", cond, "goff");
     t23->Draw("py_rf_rot>>hPy23", cond, "goff");
@@ -124,9 +124,9 @@ void plot_23O_24O()
     // 3) px, py en CM rotado: 24O (fragment-only)
     // ===========================================================
     TH1D *hPx24 = new TH1D("hPx24", "^{24}O (CM rot);p_{x} [MeV/c];A.U.",
-                           100, -500, 500);
+                           100, -0.500, 0.500);
     TH1D *hPy24 = new TH1D("hPy24", "^{24}O (CM rot);p_{y} [MeV/c];A.U.",
-                           100, -500, 500);
+                           100, -0.500, 0.500);
 
     t24->Draw("px_rf_rot>>hPx24", cond, "goff");
     t24->Draw("py_rf_rot>>hPy24", cond, "goff");
@@ -155,9 +155,9 @@ void plot_23O_24O()
     // 4) Comparación px
     // ===========================================================
     TH1D *hPx24_v = new TH1D("hPx24_v", "p_{x} (CM rot);p_{x} [MeV/c];A.U.",
-                             100, -500, 500);
+                             100, -0.500, 0.500);
     TH1D *hPx23_v = new TH1D("hPx23_v", "p_{x} (CM rot);p_{x} [MeV/c];A.U.",
-                             100, -500, 500);
+                             100, -0.500, 0.500);
 
     t24->Draw("px_rf_rot>>hPx24_v", cond, "goff");
     t23->Draw("px_rf_rot>>hPx23_v", cond, "goff");
@@ -186,9 +186,9 @@ void plot_23O_24O()
     // 5) Comparación py
     // ===========================================================
     TH1D *hPy24_v = new TH1D("hPy24_v", "p_{y} (CM rot);p_{y} [MeV/c];A.U.",
-                             100, -500, 500);
+                             100, -0.500, 0.500);
     TH1D *hPy23_v = new TH1D("hPy23_v", "p_{y} (CM rot);p_{y} [MeV/c];A.U.",
-                             100, -500, 500);
+                             100, -0.500, 0.500);
 
     t24->Draw("py_rf_rot>>hPy24_v", cond, "goff");
     t23->Draw("py_rf_rot>>hPy23_v", cond, "goff");
@@ -217,9 +217,9 @@ void plot_23O_24O()
     // 6) Comparación pT (YA guardado como pT)
     // ===========================================================
     TH1D *hPt24_v = new TH1D("hPt24_v", "p_{T} (CM rot);p_{T} [MeV/c];A.U.",
-                             50, 0, 400);
+                             50, 0, 0.400);
     TH1D *hPt23_v = new TH1D("hPt23_v", "p_{T} (CM rot);p_{T} [MeV/c];A.U.",
-                             50, 0, 400);
+                             50, 0, 0.400);
 
     t24->Draw("pT>>hPt24_v", cond, "goff");
     t23->Draw("pT>>hPt23_v", cond, "goff");
@@ -248,9 +248,9 @@ void plot_23O_24O()
     // 7) Comparación pL (YA guardado como pL)
     // ===========================================================
     TH1D *hPl24_v = new TH1D("hPl24_v", "p_{L} (CM );p_{L} [MeV/c];A.U.",
-                             50, -1000, 1000);
+                             50, -1.000, 1.000);
     TH1D *hPl23_v = new TH1D("hPl23_v", "p_{L} (CM );p_{L} [MeV/c];A.U.",
-                             50, -1000, 1000);
+                             50, -1.000, 1.000);
 
     t24->Draw("pz_sys_CM>>hPl24_v", cond, "goff");
     t23->Draw("pz_sys_CM>>hPl23_v", cond, "goff");
@@ -280,7 +280,7 @@ void plot_23O_24O()
     // ===========================================================
     TH2D *hCorr24 = new TH2D("hCorr24",
                              "^{24}O (CM rot);p_{x} [MeV/c];p_{y} [MeV/c]",
-                             50, -500, 500, 50, -500, 500);
+                             50, -0.500, 0.500, 50, -0.500, 0.500);
 
     t24->Draw("py_rf_rot:px_rf_rot>>hCorr24",
               cond, "goff");
@@ -290,7 +290,7 @@ void plot_23O_24O()
 
     TH2D *hCorr23 = new TH2D("hCorr23",
                              "^{23}O+n (CM rot);p_{x} [MeV/c];p_{y} [MeV/c]",
-                             50, -500, 500, 50, -500, 500);
+                             50, -0.500, 0.500, 50, -0.500, 0.500);
 
     t23->Draw("py_rf_rot:px_rf_rot>>hCorr23",
               cond, "goff");
@@ -302,15 +302,15 @@ void plot_23O_24O()
     // 9) pT por regiones de Erel (solo 23O+n)
     // ===========================================================
     TH1D *hPt23_p1 = new TH1D("hPt23_p1", "E_{rel}<1.8;p_{T} [MeV/c];A.U.",
-                              50, 0, 300);
+                              50, 0, 0.300);
     TH1D *hPt23_p2 = new TH1D("hPt23_p2", "2.1<E_{rel}<4;p_{T} [MeV/c];A.U.",
-                              50, 0, 300);
+                              50, 0, 0.300);
     TH1D *hPt23_p3 = new TH1D("hPt23_p3", "5<E_{rel}<7;p_{T} [MeV/c];A.U.",
-                              50, 0, 300);
+                              50, 0, 0.300);
 
-    t23->Draw("pT>>hPt23_p1", cond + " && Erel < 1.8", "goff");
-    t23->Draw("pT>>hPt23_p2", cond + " && Erel > 2.1 && Erel < 4", "goff");
-    t23->Draw("pT>>hPt23_p3", cond + " && Erel > 5.0 && Erel < 7.0", "goff");
+    t23->Draw("pT>>hPt23_p1", cond + " && Erel*1000 < 1.8", "goff");
+    t23->Draw("pT>>hPt23_p2", cond + " && Erel*1000 > 2.1 && Erel < 4", "goff");
+    t23->Draw("pT>>hPt23_p3", cond + " && Erel*1000 > 5.0 && Erel < 7.0", "goff");
 
     Normalize(hPt23_p1);
     Normalize(hPt23_p2);

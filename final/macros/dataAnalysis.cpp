@@ -205,6 +205,7 @@ void DataAnalysis::getData(bool called)
 
             ///////////// Relative energy spectrum //////////////
             // Center transversal components of the momentum
+
             Double_t nz_corr = pz_neu;
             Double_t dx_neu_off = -fNeutronPOffsets[0];
             Double_t dy_neu_off = -fNeutronPOffsets[1];
@@ -318,16 +319,35 @@ void DataAnalysis::getData(bool called)
                                   gamma_neu * m_neut);
         }
 
-        // Composed P4 of the fragment + neutron
+        // Composed P4 of the fragment + neutron (LAB)
         TLorentzVector P4_sys_lab = P4_frag_lab;
-
         if (fHasNeutrons)
             P4_sys_lab = P4_neu_lab + P4_frag_lab;
 
-        TLorentzVector P4_sys_CM = P4_sys_lab;
+        // Rotate everything into the RF of the projectile
+        TVector3 u_proj_lab = P4_proj_lab.Vect().Unit();
 
-        TVector3 beta_proj_vec = P4_proj_lab.BoostVector();
-        P4_sys_CM.Boost(-beta_proj_vec);
+        const double phi = u_proj_lab.Phi();
+        const double theta = u_proj_lab.Theta();
+
+        TRotation R;
+        R.RotateZ(-phi);
+        R.RotateY(-theta);
+
+        auto RotateP4 = [&](const TLorentzVector &in) -> TLorentzVector
+        {
+            TLorentzVector out = in;
+            TVector3 v = in.Vect();
+            v.Transform(R);
+            out.SetVect(v);
+            return out;
+        };
+
+        TLorentzVector P4_sys_rot = RotateP4(P4_sys_lab);
+        TLorentzVector P4_proj_rot = RotateP4(P4_proj_lab);
+
+        TLorentzVector P4_sys_CM = P4_sys_rot;
+        P4_sys_CM.Boost(TVector3(0.0, 0.0, -beta_proj)); // boost opposite to +Z
 
         px_sys = P4_sys_lab.Px();
         py_sys = P4_sys_lab.Py();
@@ -339,21 +359,16 @@ void DataAnalysis::getData(bool called)
         pz_sys_CM = P4_sys_CM.Pz();
         p_sys_CM = P4_sys_CM.P();
 
-        // pT and pL in the direction of the projectile
-        TVector3 ez = u_proj.Unit();
-        TVector3 ex = ez.Orthogonal().Unit();
-        TVector3 ey = ez.Cross(ex).Unit();
-
         TVector3 p3 = P4_sys_CM.Vect();
 
-        px_rf_rot = p3.Dot(ex);
-        py_rf_rot = p3.Dot(ey);
-        pz_rf_rot = p3.Dot(ez);
+        px_rf_rot = p3.X();
+        py_rf_rot = p3.Y();
+        pz_rf_rot = p3.Z();
 
         pL = pz_rf_rot;
         pT = std::sqrt(px_rf_rot * px_rf_rot + py_rf_rot * py_rf_rot);
 
-        // Other variables
+        // Other variables (angle in LAB kept as you had it)
         opa_lab = P4_neu_lab.Vect().Angle(P4_frag_lab.Vect());
 
         if (called)
