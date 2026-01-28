@@ -339,5 +339,191 @@ void plot_23O_24O()
     leg10->AddEntry(hPt23_p3, "5<E_{rel}<7", "lf");
     leg10->Draw();
 
+    // ===========================================================
+    // 10) Comparaciones por picos de Erel:
+    //     - px_rf_rot: 24O (sin corte) vs 23O+n (corte en el pico)
+    //     - pT:        24O (sin corte) vs 23O+n (corte en el pico)
+    // ===========================================================
+
+    TString cut_p1 = cond + " && Erel*1000 < 1.8";
+    TString cut_p2 = cond + " && Erel*1000 > 2.1 && Erel*1000 < 4.0";
+    TString cut_p3 = cond + " && Erel*1000 > 5.0 && Erel*1000 < 7.0";
+
+    // ---------------------------
+    // A) px_rf_rot (3 canvases)
+    // ---------------------------
+    const int nBinsPx = 40;
+    const double pxMin = -0.5;
+    const double pxMax = 0.5;
+
+    // Pico 1
+    TH1D *hPx24_p1 = new TH1D("hPx24_p1", "p_{x}; p_{x} [GeV/c]; A.U.", nBinsPx, pxMin, pxMax);
+    TH1D *hPx23_p1 = new TH1D("hPx23_p1", "p_{x}; p_{x} [GeV/c]; A.U.", nBinsPx, pxMin, pxMax);
+
+    t24->Draw("px_rf_rot>>hPx24_p1", cond, "goff");   // 24O: sin corte Erel
+    t23->Draw("px_rf_rot>>hPx23_p1", cut_p1, "goff"); // 23O+n: corte pico 1
+
+    Normalize(hPx24_p1);
+    Normalize(hPx23_p1);
+
+    hPx24_p1->SetLineColor(colFrag);
+    hPx24_p1->SetFillColorAlpha(colFrag, 0.3);
+    hPx24_p1->SetLineWidth(2);
+
+    hPx23_p1->SetLineColor(col1n);
+    hPx23_p1->SetFillColorAlpha(col1n, 0.3);
+    hPx23_p1->SetLineWidth(2);
+
+    TCanvas *c11 = new TCanvas("c11", "px_rf_rot peak 1", 800, 600);
+    hPx24_p1->Draw("HIST");
+    hPx23_p1->Draw("HIST SAME");
+
+    TLegend *leg11 = new TLegend(0.55, 0.75, 0.88, 0.88);
+    leg11->AddEntry(hPx24_p1, "^{24}O (all)", "lf");
+    leg11->AddEntry(hPx23_p1, "^{23}O+n (E_{rel} peak 1)", "lf");
+    leg11->Draw();
+
+    // Pico 2
+    TH1D *hPx24_p2 = new TH1D("hPx24_p2", "; p_{x} [GeV/c]; A.U.", nBinsPx, pxMin, pxMax);
+    TH1D *hPx23_p2 = new TH1D("hPx23_p2", "; p_{x} [GeV/c]; A.U.", nBinsPx, pxMin, pxMax);
+
+    t24->Draw("px_rf_rot>>hPx24_p2", cond, "goff");
+    t23->Draw("px_rf_rot>>hPx23_p2", cut_p2, "goff");
+
+    Normalize(hPx24_p2);
+    Normalize(hPx23_p2);
+
+    hPx24_p2->SetLineColor(colFrag);
+    hPx24_p2->SetFillColorAlpha(colFrag, 0.3);
+    hPx24_p2->SetLineWidth(2);
+
+    hPx23_p2->SetLineColor(col1n);
+    hPx23_p2->SetFillColorAlpha(col1n, 0.3);
+    hPx23_p2->SetLineWidth(2);
+
+    TCanvas *c12 = new TCanvas("c12", "px_rf_rot peak 2", 800, 600);
+    hPx24_p2->Draw("HIST");
+    hPx23_p2->Draw("HIST SAME");
+
+    TLegend *leg12 = new TLegend(0.55, 0.75, 0.88, 0.88);
+    leg12->AddEntry(hPx24_p2, "^{24}O (all)", "lf");
+    leg12->AddEntry(hPx23_p2, "^{23}O+n (E_{rel} peak 2)", "lf");
+    leg12->Draw();
+
+    // Pico 3
+    TH1D *hPx24_p3 = new TH1D("hPx24_p3", "; p_{x} [GeV/c]; A.U.", nBinsPx, pxMin, pxMax);
+    TH1D *hPx23_p3 = new TH1D("hPx23_p3", "; p_{x} [GeV/c]; A.U.", nBinsPx, pxMin, pxMax);
+
+    t24->Draw("px_rf_rot>>hPx24_p3", cond, "goff");
+    t23->Draw("px_rf_rot>>hPx23_p3", cut_p3, "goff");
+
+    Normalize(hPx24_p3);
+    Normalize(hPx23_p3);
+
+    hPx24_p3->SetLineColor(colFrag);
+    hPx24_p3->SetFillColorAlpha(colFrag, 0.3);
+    hPx24_p3->SetLineWidth(2);
+
+    hPx23_p3->SetLineColor(col1n);
+    hPx23_p3->SetFillColorAlpha(col1n, 0.3);
+    hPx23_p3->SetLineWidth(2);
+
+    TCanvas *c13 = new TCanvas("c13", "px_rf_rot peak 3", 800, 600);
+    hPx24_p3->Draw("HIST");
+    hPx23_p3->Draw("HIST SAME");
+
+    TLegend *leg13 = new TLegend(0.55, 0.75, 0.88, 0.88);
+    leg13->AddEntry(hPx24_p3, "^{24}O (all)", "lf");
+    leg13->AddEntry(hPx23_p3, "^{23}O+n (E_{rel} peak 3)", "lf");
+    leg13->Draw();
+
+    // ---------------------------
+    // B) pT (3 canvases)
+    // ---------------------------
+    const int nBinsPt = 40;
+    const double ptMin = 0.0;
+    const double ptMax = 0.4;
+
+    // Pico 1
+    TH1D *hPt24_comp_p1 = new TH1D("hPt24_comp_p1", "; p_{T} [GeV/c]; A.U.", nBinsPt, ptMin, ptMax);
+    TH1D *hPt23_comp_p1 = new TH1D("hPt23_comp_p1", "; p_{T} [GeV/c]; A.U.", nBinsPt, ptMin, ptMax);
+
+    t24->Draw("pT>>hPt24_comp_p1", cond, "goff");
+    t23->Draw("pT>>hPt23_comp_p1", cut_p1, "goff");
+
+    Normalize(hPt24_comp_p1);
+    Normalize(hPt23_comp_p1);
+
+    hPt24_comp_p1->SetLineColor(colFrag);
+    hPt24_comp_p1->SetFillColorAlpha(colFrag, 0.3);
+    hPt24_comp_p1->SetLineWidth(2);
+
+    hPt23_comp_p1->SetLineColor(col1n);
+    hPt23_comp_p1->SetFillColorAlpha(col1n, 0.3);
+    hPt23_comp_p1->SetLineWidth(2);
+
+    TCanvas *c14 = new TCanvas("c14", "pT peak 1", 800, 600);
+    hPt24_comp_p1->Draw("HIST");
+    hPt23_comp_p1->Draw("HIST SAME");
+
+    TLegend *leg14 = new TLegend(0.55, 0.75, 0.88, 0.88);
+    leg14->AddEntry(hPt24_comp_p1, "^{24}O (all)", "lf");
+    leg14->AddEntry(hPt23_comp_p1, "^{23}O+n (E_{rel} peak 1)", "lf");
+    leg14->Draw();
+
+    // Pico 2
+    TH1D *hPt24_comp_p2 = new TH1D("hPt24_comp_p2", "; p_{T} [GeV/c]; A.U.", nBinsPt, ptMin, ptMax);
+    TH1D *hPt23_comp_p2 = new TH1D("hPt23_comp_p2", "; p_{T} [GeV/c]; A.U.", nBinsPt, ptMin, ptMax);
+
+    t24->Draw("pT>>hPt24_comp_p2", cond, "goff");
+    t23->Draw("pT>>hPt23_comp_p2", cut_p2, "goff");
+
+    Normalize(hPt24_comp_p2);
+    Normalize(hPt23_comp_p2);
+
+    hPt24_comp_p2->SetLineColor(colFrag);
+    hPt24_comp_p2->SetFillColorAlpha(colFrag, 0.3);
+    hPt24_comp_p2->SetLineWidth(2);
+
+    hPt23_comp_p2->SetLineColor(col1n);
+    hPt23_comp_p2->SetFillColorAlpha(col1n, 0.3);
+    hPt23_comp_p2->SetLineWidth(2);
+
+    TCanvas *c15 = new TCanvas("c15", "pT peak 2", 800, 600);
+    hPt24_comp_p2->Draw("HIST");
+    hPt23_comp_p2->Draw("HIST SAME");
+
+    TLegend *leg15 = new TLegend(0.55, 0.75, 0.88, 0.88);
+    leg15->AddEntry(hPt24_comp_p2, "^{24}O (all)", "lf");
+    leg15->AddEntry(hPt23_comp_p2, "^{23}O+n (E_{rel} peak 2)", "lf");
+    leg15->Draw();
+
+    // Pico 3
+    TH1D *hPt24_comp_p3 = new TH1D("hPt24_comp_p3", "; p_{T} [GeV/c]; A.U.", nBinsPt, ptMin, ptMax);
+    TH1D *hPt23_comp_p3 = new TH1D("hPt23_comp_p3", "; p_{T} [GeV/c]; A.U.", nBinsPt, ptMin, ptMax);
+
+    t24->Draw("pT>>hPt24_comp_p3", cond, "goff");
+    t23->Draw("pT>>hPt23_comp_p3", cut_p3, "goff");
+
+    Normalize(hPt24_comp_p3);
+    Normalize(hPt23_comp_p3);
+
+    hPt24_comp_p3->SetLineColor(colFrag);
+    hPt24_comp_p3->SetFillColorAlpha(colFrag, 0.3);
+    hPt24_comp_p3->SetLineWidth(2);
+
+    hPt23_comp_p3->SetLineColor(col1n);
+    hPt23_comp_p3->SetFillColorAlpha(col1n, 0.3);
+    hPt23_comp_p3->SetLineWidth(2);
+
+    TCanvas *c16 = new TCanvas("c16", "pT peak 3", 800, 600);
+    hPt24_comp_p3->Draw("HIST");
+    hPt23_comp_p3->Draw("HIST SAME");
+
+    TLegend *leg16 = new TLegend(0.55, 0.75, 0.88, 0.88);
+    leg16->AddEntry(hPt24_comp_p3, "^{24}O (all)", "lf");
+    leg16->AddEntry(hPt23_comp_p3, "^{23}O+n (E_{rel} peak 3)", "lf");
+    leg16->Draw();
+
     std::cout << "[plot_23O_24O] DONE (KinTree)" << std::endl;
 }

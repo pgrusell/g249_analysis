@@ -194,14 +194,14 @@ void fitMomentaDist()
     mc->Add(momdis_1d52_25_resampled.Qy);
 
     // mc->Add(momdis_1p12_30_resampled.Qy);
-    //  mc->Add(momdis_1p12_30_resampled.Qy);
+    // mc->Add(momdis_1p12_30_resampled.Qy);
 
     TFractionFitter *fit = new TFractionFitter(momdis_exp, mc);
 
     fit->Constrain(0, 0.0, 1.0);
     fit->Constrain(1, 0.0, 1.0);
     // fit->Constrain(2, 0.0, 1.0);
-    //  fit->Constrain(3, 0.0, 1.0);
+    // fit->Constrain(3, 0.0, 1.0);
 
     Int_t status = fit->Fit();
     std::cout << "fit status: " << status << std::endl;
