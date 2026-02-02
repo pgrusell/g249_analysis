@@ -154,13 +154,13 @@ void plot_23O_24O()
     // ===========================================================
     // 4) Comparación px
     // ===========================================================
-    TH1D *hPx24_v = new TH1D("hPx24_v", "p_{x} (CM rot);p_{x} [MeV/c];A.U.",
-                             100, -0.500, 0.500);
-    TH1D *hPx23_v = new TH1D("hPx23_v", "p_{x} (CM rot);p_{x} [MeV/c];A.U.",
-                             100, -0.500, 0.500);
+    TH1D *hPx24_v = new TH1D("hPx24_v", ";p_{x} [MeV/c];A.U.",
+                             35, -0.500 * 1000, 0.500 * 1000);
+    TH1D *hPx23_v = new TH1D("hPx23_v", ";p_{x} [MeV/c];A.U.",
+                             35, -0.500 * 1000, 0.500 * 1000);
 
-    t24->Draw("px_rf_rot>>hPx24_v", cond, "goff");
-    t23->Draw("px_rf_rot>>hPx23_v", cond, "goff");
+    t24->Draw("px_rf_rot*1000>>hPx24_v", cond, "goff");
+    t23->Draw("px_rf_rot*1000>>hPx23_v", cond, "goff");
 
     Normalize(hPx24_v);
     Normalize(hPx23_v);
@@ -185,13 +185,13 @@ void plot_23O_24O()
     // ===========================================================
     // 5) Comparación py
     // ===========================================================
-    TH1D *hPy24_v = new TH1D("hPy24_v", "p_{y} (CM rot);p_{y} [MeV/c];A.U.",
-                             100, -0.500, 0.500);
+    TH1D *hPy24_v = new TH1D("hPy24_v", ";p_{y} [MeV/c];A.U.",
+                             35, -0.500 * 1000, 0.500 * 1000);
     TH1D *hPy23_v = new TH1D("hPy23_v", "p_{y} (CM rot);p_{y} [MeV/c];A.U.",
-                             100, -0.500, 0.500);
+                             35, -0.500 * 1000, 0.500 * 1000);
 
-    t24->Draw("py_rf_rot>>hPy24_v", cond, "goff");
-    t23->Draw("py_rf_rot>>hPy23_v", cond, "goff");
+    t24->Draw("py_rf_rot*1000>>hPy24_v", cond, "goff");
+    t23->Draw("py_rf_rot*1000>>hPy23_v", cond, "goff");
 
     Normalize(hPy24_v);
     Normalize(hPy23_v);
@@ -216,13 +216,13 @@ void plot_23O_24O()
     // ===========================================================
     // 6) Comparación pT (YA guardado como pT)
     // ===========================================================
-    TH1D *hPt24_v = new TH1D("hPt24_v", "p_{T} (CM rot);p_{T} [MeV/c];A.U.",
-                             50, 0, 0.400);
-    TH1D *hPt23_v = new TH1D("hPt23_v", "p_{T} (CM rot);p_{T} [MeV/c];A.U.",
-                             50, 0, 0.400);
+    TH1D *hPt24_v = new TH1D("hPt24_v", "p_{T} = #sqrt{p_{x}^{2}+p_{y}^{2}};p_{T} [MeV/c];A.U.",
+                             40, 0, 0.400 * 1000);
+    TH1D *hPt23_v = new TH1D("hPt23_v", "sqrt{p_x^2+p_y^2};p_{T} [MeV/c];A.U.",
+                             40, 0, 0.400 * 1000);
 
-    t24->Draw("pT>>hPt24_v", cond, "goff");
-    t23->Draw("pT>>hPt23_v", cond, "goff");
+    t24->Draw("pT * 1000>>hPt24_v", cond, "goff");
+    t23->Draw("pT * 1000>>hPt23_v", cond, "goff");
 
     Normalize(hPt24_v);
     Normalize(hPt23_v);
@@ -442,14 +442,14 @@ void plot_23O_24O()
     // ---------------------------
     const int nBinsPt = 40;
     const double ptMin = 0.0;
-    const double ptMax = 0.4;
+    const double ptMax = 400.0;
 
     // Pico 1
-    TH1D *hPt24_comp_p1 = new TH1D("hPt24_comp_p1", "; p_{T} [GeV/c]; A.U.", nBinsPt, ptMin, ptMax);
-    TH1D *hPt23_comp_p1 = new TH1D("hPt23_comp_p1", "; p_{T} [GeV/c]; A.U.", nBinsPt, ptMin, ptMax);
+    TH1D *hPt24_comp_p1 = new TH1D("hPt24_comp_p1", "p_{T} = #sqrt{p_{x}^{2}+p_{y}^{2}}; p_{T} [MeV/c]; A.U.", 20, ptMin, ptMax);
+    TH1D *hPt23_comp_p1 = new TH1D("hPt23_comp_p1", "p_{T} = #sqrt{p_{x}^{2}+p_{y}^{2}}; p_{T} [MeV/c]; A.U.", 20, ptMin, ptMax);
 
-    t24->Draw("pT>>hPt24_comp_p1", cond, "goff");
-    t23->Draw("pT>>hPt23_comp_p1", cut_p1, "goff");
+    t24->Draw("pT*1000>>hPt24_comp_p1", cond, "goff");
+    t23->Draw("pT*1000>>hPt23_comp_p1", cut_p1, "goff");
 
     Normalize(hPt24_comp_p1);
     Normalize(hPt23_comp_p1);
@@ -463,8 +463,11 @@ void plot_23O_24O()
     hPt23_comp_p1->SetLineWidth(2);
 
     TCanvas *c14 = new TCanvas("c14", "pT peak 1", 800, 600);
+    c14->SetFillColor(TColor::GetColor(249, 249, 249));
     hPt24_comp_p1->Draw("HIST");
     hPt23_comp_p1->Draw("HIST SAME");
+    hPt24_comp_p1->Draw("E1 SAME");
+    hPt23_comp_p1->Draw("E1 SAME");
 
     TLegend *leg14 = new TLegend(0.55, 0.75, 0.88, 0.88);
     leg14->AddEntry(hPt24_comp_p1, "^{24}O (all)", "lf");
@@ -472,11 +475,11 @@ void plot_23O_24O()
     leg14->Draw();
 
     // Pico 2
-    TH1D *hPt24_comp_p2 = new TH1D("hPt24_comp_p2", "; p_{T} [GeV/c]; A.U.", nBinsPt, ptMin, ptMax);
-    TH1D *hPt23_comp_p2 = new TH1D("hPt23_comp_p2", "; p_{T} [GeV/c]; A.U.", nBinsPt, ptMin, ptMax);
+    TH1D *hPt24_comp_p2 = new TH1D("hPt24_comp_p2", "p_{T} = #sqrt{p_{x}^{2}+p_{y}^{2}}; p_{T} [MeV/c]; A.U.", nBinsPt, ptMin, ptMax);
+    TH1D *hPt23_comp_p2 = new TH1D("hPt23_comp_p2", "p_{T} = #sqrt{p_{x}^{2}+p_{y}^{2}}; p_{T} [MeV/c]; A.U.", nBinsPt, ptMin, ptMax);
 
-    t24->Draw("pT>>hPt24_comp_p2", cond, "goff");
-    t23->Draw("pT>>hPt23_comp_p2", cut_p2, "goff");
+    t24->Draw("pT*1000>>hPt24_comp_p2", cond, "goff");
+    t23->Draw("pT*1000>>hPt23_comp_p2", cut_p2, "goff");
 
     Normalize(hPt24_comp_p2);
     Normalize(hPt23_comp_p2);
@@ -490,8 +493,11 @@ void plot_23O_24O()
     hPt23_comp_p2->SetLineWidth(2);
 
     TCanvas *c15 = new TCanvas("c15", "pT peak 2", 800, 600);
+    c15->SetFillColor(TColor::GetColor(249, 249, 249));
     hPt24_comp_p2->Draw("HIST");
     hPt23_comp_p2->Draw("HIST SAME");
+    hPt24_comp_p2->Draw("E1 SAME");
+    hPt23_comp_p2->Draw("E1 SAME");
 
     TLegend *leg15 = new TLegend(0.55, 0.75, 0.88, 0.88);
     leg15->AddEntry(hPt24_comp_p2, "^{24}O (all)", "lf");
@@ -499,11 +505,11 @@ void plot_23O_24O()
     leg15->Draw();
 
     // Pico 3
-    TH1D *hPt24_comp_p3 = new TH1D("hPt24_comp_p3", "; p_{T} [GeV/c]; A.U.", nBinsPt, ptMin, ptMax);
-    TH1D *hPt23_comp_p3 = new TH1D("hPt23_comp_p3", "; p_{T} [GeV/c]; A.U.", nBinsPt, ptMin, ptMax);
+    TH1D *hPt24_comp_p3 = new TH1D("hPt24_comp_p3", "p_{T} = #sqrt{p_{x}^{2}+p_{y}^{2}}; p_{T} [MeV/c]; A.U.", nBinsPt, ptMin, ptMax);
+    TH1D *hPt23_comp_p3 = new TH1D("hPt23_comp_p3", "p_{T} = #sqrt{p_{x}^{2}+p_{y}^{2}}; p_{T} [MeV/c]; A.U.", nBinsPt, ptMin, ptMax);
 
-    t24->Draw("pT>>hPt24_comp_p3", cond, "goff");
-    t23->Draw("pT>>hPt23_comp_p3", cut_p3, "goff");
+    t24->Draw("pT*1000>>hPt24_comp_p3", cond, "goff");
+    t23->Draw("pT*1000>>hPt23_comp_p3", cut_p3, "goff");
 
     Normalize(hPt24_comp_p3);
     Normalize(hPt23_comp_p3);
@@ -517,8 +523,11 @@ void plot_23O_24O()
     hPt23_comp_p3->SetLineWidth(2);
 
     TCanvas *c16 = new TCanvas("c16", "pT peak 3", 800, 600);
+    c16->SetFillColor(TColor::GetColor(249, 249, 249));
     hPt24_comp_p3->Draw("HIST");
     hPt23_comp_p3->Draw("HIST SAME");
+    hPt24_comp_p3->Draw("E1 SAME");
+    hPt23_comp_p3->Draw("E1 SAME");
 
     TLegend *leg16 = new TLegend(0.55, 0.75, 0.88, 0.88);
     leg16->AddEntry(hPt24_comp_p3, "^{24}O (all)", "lf");
