@@ -175,7 +175,7 @@ void eventFilter(std::string setting = "", TString reaction = "", bool test = fa
     }
 
     if (test)
-        outFileName += "_test2";
+        outFileName += "_test";
 
     outFileName += ".root";
 
@@ -418,7 +418,7 @@ void eventFilter(std::string setting = "", TString reaction = "", bool test = fa
                              {"p_neu", "n_dir", "beta_neu"});
     }
 
-    // CALIFA opening angle
+    // CALIFA opening angle and cluster angles
     auto df_califa = df_p4n.Define("califa_opa", [](TClonesArray &clu)
                                    {
                                        std::vector<double> th, ph, en;
@@ -480,7 +480,81 @@ void eventFilter(std::string setting = "", TString reaction = "", bool test = fa
                                        }
 
                                        return opa; },
-                                   {"CalifaClusterData"});
+                                   {"CalifaClusterData"})
+                         .Define("califa_theta_L", [](TClonesArray &clu)
+                                 {
+                                       double fMinProtonE = 35000.;
+                                       double maxEL = 0.;
+                                       double thetaL = -999.0;
+                                       for (int i = 0; i < clu.GetEntriesFast(); ++i)
+                                       {
+                                           auto *hit = (R3BCalifaClusterData *)clu.UncheckedAt(i);
+                                           double theta = hit->GetTheta();
+                                           double phi   = hit->GetPhi();
+                                           double E     = hit->GetEnergy();
+                                           if (E >= 20e3 && E > maxEL && std::abs(phi * TMath::RadToDeg()) > 90.)
+                                           {
+                                               maxEL = E;
+                                               thetaL = theta;
+                                           }
+                                       }
+                                       return (maxEL > fMinProtonE) ? thetaL : -999.0; },
+                                 {"CalifaClusterData"})
+                         .Define("califa_phi_L", [](TClonesArray &clu)
+                                 {
+                                       double fMinProtonE = 35000.;
+                                       double maxEL = 0.;
+                                       double phiL = -999.0;
+                                       for (int i = 0; i < clu.GetEntriesFast(); ++i)
+                                       {
+                                           auto *hit = (R3BCalifaClusterData *)clu.UncheckedAt(i);
+                                           double phi   = hit->GetPhi();
+                                           double E     = hit->GetEnergy();
+                                           if (E >= 20e3 && E > maxEL && std::abs(phi * TMath::RadToDeg()) < 90.)
+                                           {
+                                               maxEL = E;
+                                               phiL = phi;
+                                           }
+                                       }
+                                       return (maxEL > fMinProtonE) ? phiL : -999.0; },
+                                 {"CalifaClusterData"})
+                         .Define("califa_theta_R", [](TClonesArray &clu)
+                                 {
+                                       double fMinProtonE = 35000.;
+                                       double maxER = 0.;
+                                       double thetaR = -999.0;
+                                       for (int i = 0; i < clu.GetEntriesFast(); ++i)
+                                       {
+                                           auto *hit = (R3BCalifaClusterData *)clu.UncheckedAt(i);
+                                           double theta = hit->GetTheta();
+                                           double phi   = hit->GetPhi();
+                                           double E     = hit->GetEnergy();
+                                           if (E >= 20e3 && E > maxER && std::abs(phi * TMath::RadToDeg()) > 90.)
+                                           {
+                                               maxER = E;
+                                               thetaR = theta;
+                                           }
+                                       }
+                                       return (maxER > fMinProtonE) ? thetaR : -999.0; },
+                                 {"CalifaClusterData"})
+                         .Define("califa_phi_R", [](TClonesArray &clu)
+                                 {
+                                       double fMinProtonE = 35000.;
+                                       double maxER = 0.;
+                                       double phiR = -999.0;
+                                       for (int i = 0; i < clu.GetEntriesFast(); ++i)
+                                       {
+                                           auto *hit = (R3BCalifaClusterData *)clu.UncheckedAt(i);
+                                           double phi   = hit->GetPhi();
+                                           double E     = hit->GetEnergy();
+                                           if (E >= 20e3 && E > maxER && std::abs(phi * TMath::RadToDeg()) < 90.)
+                                           {
+                                               maxER = E;
+                                               phiR = phi;
+                                           }
+                                       }
+                                       return (maxER > fMinProtonE) ? phiR : -999.0; },
+                                 {"CalifaClusterData"});
 
     auto df_califa_good = df_califa.Filter(
         [](double opa)
@@ -526,6 +600,10 @@ void eventFilter(std::string setting = "", TString reaction = "", bool test = fa
         "beta_frag",
         "p_frag",
         "califa_opa",
+        "califa_theta_L",
+        "califa_phi_L",
+        "califa_theta_R",
+        "califa_phi_R",
         "px_frag",
         "py_frag",
         "pz_frag",
@@ -546,6 +624,10 @@ void eventFilter(std::string setting = "", TString reaction = "", bool test = fa
             "p_frag",
             "p_neu",
             "califa_opa",
+            "califa_theta_L",
+            "califa_phi_L",
+            "califa_theta_R",
+            "califa_phi_R",
             "px_frag",
             "py_frag",
             "pz_frag",
