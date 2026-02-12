@@ -424,10 +424,11 @@ void eventFilter(std::string setting = "", TString reaction = "", bool test = fa
                                  {
         double opa = -999.0;
 
+        // Define thresholds for the clusters
         const double EminClu = 20e3;   // 20 keV prefilter
         const double EminP   = 35e3;   // 35 keV for the selected two
 
-        // top-2 by energy
+        // Select the two higher energy clusters
         double e1=-1., e2=-1.;
         double th1=-999., ph1=-999.;
         double th2=-999., ph2=-999.;
@@ -447,6 +448,7 @@ void eventFilter(std::string setting = "", TString reaction = "", bool test = fa
 
         if (e1 < EminP || e2 < EminP) return opa;
 
+        // Ask for the clusters to be coplanars (+- 30 deg)
         const double dphi = TVector2::Phi_mpi_pi(ph2 - ph1);
         const double dphiDeg = std::abs(dphi) * TMath::RadToDeg();
         if (std::abs(dphiDeg - 180.0) > 30.0) return opa;
@@ -456,14 +458,14 @@ void eventFilter(std::string setting = "", TString reaction = "", bool test = fa
         opa = v1.Angle(v2); // rad
 
         return opa; }, {"CalifaClusterData"})
-
-                         // decide swap ONCE per event (thread-safe with IMT)
                          .Define("califa_swap", []()
                                  {
+        
+        // Save theta and phi of the clusters
+        // Following lines are just a way to randomly asigned cluster1 and cluster2
+        // If we do it by energy we (maybe) can bias the phi1 vs phi2 plot.
         static thread_local TRandom3 rng(0);
         return rng.Rndm() < 0.5; })
-
-                         // helper columns: the 2 candidates (top-2) after cuts; return -999 if not valid
                          .Define("califa_th1", [](TClonesArray &clu)
                                  {
         const double EminClu = 20e3, EminP = 35e3;
@@ -525,7 +527,6 @@ void eventFilter(std::string setting = "", TString reaction = "", bool test = fa
         if (std::abs(dphiDeg - 180.0) > 30.0) return -999.0;
         return ph2; }, {"CalifaClusterData"})
 
-                         // Now map to L/R using the SAME swap for all four outputs
                          .Define("califa_theta_L", [](bool swap, double th1, double th2)
                                  {
         if (th1 < -990.0 || th2 < -990.0) return -999.0;
