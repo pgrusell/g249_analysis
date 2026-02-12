@@ -419,142 +419,129 @@ void eventFilter(std::string setting = "", TString reaction = "", bool test = fa
     }
 
     // CALIFA opening angle and cluster angles
-    auto df_califa = df_p4n.Define("califa_opa", [](TClonesArray &clu)
-                                   {
-                                       std::vector<double> th, ph, en;
-                                       th.reserve(clu.GetEntriesFast());
-                                       ph.reserve(clu.GetEntriesFast());
-                                       en.reserve(clu.GetEntriesFast());
-
-                                       for (int i = 0; i < clu.GetEntriesFast(); ++i)
-                                       {
-                                           auto *hit = (R3BCalifaClusterData *)clu.UncheckedAt(i);
-                                           double theta = hit->GetTheta(); 
-                                           double phi   = hit->GetPhi();     // rad
-                                           double E     = hit->GetEnergy();  // keV
-
-                                           if (E >= 20e3)
-                                           { 
-                                               th.push_back(theta);
-                                               ph.push_back(phi);
-                                               en.push_back(E);
-                                           }
-                                       }
-
-                                       bool good = false;
-                                       double opa = -999.0;
-                                       if (th.size() > 1)
-                                       {
-                                           //double fMinProtonE = 100000.; // 100 keV
-                                           double fMinProtonE = 35000.; // 35 keV
-                                           double maxEL = 0., maxER = 0.;
-                                           TVector3 masterL, masterR;
-
-                                           for (size_t i = 0; i < th.size(); ++i)
-                                           {
-                                               double theta = th[i];
-                                               double phi   = ph[i];
-                                               double E     = en[i];
-
-                                               if (E > maxER && std::abs(phi * TMath::RadToDeg()) > 90.)
-                                               {
-                                                   masterR.SetMagThetaPhi(1., theta, phi);
-                                                   maxER = E;
-                                               }
-                                               if (E > maxEL && std::abs(phi * TMath::RadToDeg()) < 90.)
-                                               {
-                                                   masterL.SetMagThetaPhi(1., theta, phi);
-                                                   maxEL = E;
-                                               }
-                                           }
-
-                                           if (maxEL > fMinProtonE && maxER > fMinProtonE)
-                                           {
-                                               double dphiDeg = std::abs(masterR.Phi() - masterL.Phi()) * TMath::RadToDeg();
-                                               if (std::abs(dphiDeg - 180.) < 30.)
-                                               {
-                                                   good = true;
-                                                   opa = masterR.Angle(masterL); // en rad
-                                               }
-                                           }
-                                       }
-
-                                       return opa; },
-                                   {"CalifaClusterData"})
-                         .Define("califa_theta_L", [](TClonesArray &clu)
+    auto df_califa = df_p4n
+                         .Define("califa_opa", [](TClonesArray &clu)
                                  {
-                                       double fMinProtonE = 35000.;
-                                       double maxEL = 0.;
-                                       double thetaL = -999.0;
-                                       for (int i = 0; i < clu.GetEntriesFast(); ++i)
-                                       {
-                                           auto *hit = (R3BCalifaClusterData *)clu.UncheckedAt(i);
-                                           double theta = hit->GetTheta();
-                                           double phi   = hit->GetPhi();
-                                           double E     = hit->GetEnergy();
-                                           if (E >= 20e3 && E > maxEL && std::abs(phi * TMath::RadToDeg()) > 90.)
-                                           {
-                                               maxEL = E;
-                                               thetaL = theta;
-                                           }
-                                       }
-                                       return (maxEL > fMinProtonE) ? thetaL : -999.0; },
-                                 {"CalifaClusterData"})
-                         .Define("califa_phi_L", [](TClonesArray &clu)
+        double opa = -999.0;
+
+        const double EminClu = 20e3;   // 20 keV prefilter
+        const double EminP   = 35e3;   // 35 keV for the selected two
+
+        // top-2 by energy
+        double e1=-1., e2=-1.;
+        double th1=-999., ph1=-999.;
+        double th2=-999., ph2=-999.;
+
+        for (int i = 0; i < clu.GetEntriesFast(); ++i)
+        {
+            auto *hit = (R3BCalifaClusterData *)clu.UncheckedAt(i);
+            const double E = hit->GetEnergy();
+            if (E < EminClu) continue;
+
+            const double th = hit->GetTheta();
+            const double ph = hit->GetPhi();
+
+            if (E > e1) { e2=e1; th2=th1; ph2=ph1; e1=E; th1=th; ph1=ph; }
+            else if (E > e2) { e2=E; th2=th; ph2=ph; }
+        }
+
+        if (e1 < EminP || e2 < EminP) return opa;
+
+        const double dphi = TVector2::Phi_mpi_pi(ph2 - ph1);
+        const double dphiDeg = std::abs(dphi) * TMath::RadToDeg();
+        if (std::abs(dphiDeg - 180.0) > 30.0) return opa;
+
+        TVector3 v1; v1.SetMagThetaPhi(1.0, th1, ph1);
+        TVector3 v2; v2.SetMagThetaPhi(1.0, th2, ph2);
+        opa = v1.Angle(v2); // rad
+
+        return opa; }, {"CalifaClusterData"})
+
+                         // decide swap ONCE per event (thread-safe with IMT)
+                         .Define("califa_swap", []()
                                  {
-                                       double fMinProtonE = 35000.;
-                                       double maxEL = 0.;
-                                       double phiL = -999.0;
-                                       for (int i = 0; i < clu.GetEntriesFast(); ++i)
-                                       {
-                                           auto *hit = (R3BCalifaClusterData *)clu.UncheckedAt(i);
-                                           double phi   = hit->GetPhi();
-                                           double E     = hit->GetEnergy();
-                                           if (E >= 20e3 && E > maxEL && std::abs(phi * TMath::RadToDeg()) < 90.)
-                                           {
-                                               maxEL = E;
-                                               phiL = phi;
-                                           }
-                                       }
-                                       return (maxEL > fMinProtonE) ? phiL : -999.0; },
-                                 {"CalifaClusterData"})
-                         .Define("califa_theta_R", [](TClonesArray &clu)
+        static thread_local TRandom3 rng(0);
+        return rng.Rndm() < 0.5; })
+
+                         // helper columns: the 2 candidates (top-2) after cuts; return -999 if not valid
+                         .Define("califa_th1", [](TClonesArray &clu)
                                  {
-                                       double fMinProtonE = 35000.;
-                                       double maxER = 0.;
-                                       double thetaR = -999.0;
-                                       for (int i = 0; i < clu.GetEntriesFast(); ++i)
-                                       {
-                                           auto *hit = (R3BCalifaClusterData *)clu.UncheckedAt(i);
-                                           double theta = hit->GetTheta();
-                                           double phi   = hit->GetPhi();
-                                           double E     = hit->GetEnergy();
-                                           if (E >= 20e3 && E > maxER && std::abs(phi * TMath::RadToDeg()) > 90.)
-                                           {
-                                               maxER = E;
-                                               thetaR = theta;
-                                           }
-                                       }
-                                       return (maxER > fMinProtonE) ? thetaR : -999.0; },
-                                 {"CalifaClusterData"})
-                         .Define("califa_phi_R", [](TClonesArray &clu)
+        const double EminClu = 20e3, EminP = 35e3;
+        double e1=-1., e2=-1., th1=-999., ph1=-999., th2=-999., ph2=-999.;
+        for (int i=0;i<clu.GetEntriesFast();++i){
+            auto *hit=(R3BCalifaClusterData*)clu.UncheckedAt(i);
+            double E=hit->GetEnergy(); if(E<EminClu) continue;
+            double th=hit->GetTheta(), ph=hit->GetPhi();
+            if(E>e1){ e2=e1; th2=th1; ph2=ph1; e1=E; th1=th; ph1=ph; }
+            else if(E>e2){ e2=E; th2=th; ph2=ph; }
+        }
+        if (e1 < EminP || e2 < EminP) return -999.0;
+        double dphiDeg = std::abs(TVector2::Phi_mpi_pi(ph2 - ph1))*TMath::RadToDeg();
+        if (std::abs(dphiDeg - 180.0) > 30.0) return -999.0;
+        return th1; }, {"CalifaClusterData"})
+                         .Define("califa_ph1", [](TClonesArray &clu)
                                  {
-                                       double fMinProtonE = 35000.;
-                                       double maxER = 0.;
-                                       double phiR = -999.0;
-                                       for (int i = 0; i < clu.GetEntriesFast(); ++i)
-                                       {
-                                           auto *hit = (R3BCalifaClusterData *)clu.UncheckedAt(i);
-                                           double phi   = hit->GetPhi();
-                                           double E     = hit->GetEnergy();
-                                           if (E >= 20e3 && E > maxER && std::abs(phi * TMath::RadToDeg()) < 90.)
-                                           {
-                                               maxER = E;
-                                               phiR = phi;
-                                           }
-                                       }
-                                       return (maxER > fMinProtonE) ? phiR : -999.0; },
-                                 {"CalifaClusterData"});
+        const double EminClu = 20e3, EminP = 35e3;
+        double e1=-1., e2=-1., th1=-999., ph1=-999., th2=-999., ph2=-999.;
+        for (int i=0;i<clu.GetEntriesFast();++i){
+            auto *hit=(R3BCalifaClusterData*)clu.UncheckedAt(i);
+            double E=hit->GetEnergy(); if(E<EminClu) continue;
+            double th=hit->GetTheta(), ph=hit->GetPhi();
+            if(E>e1){ e2=e1; th2=th1; ph2=ph1; e1=E; th1=th; ph1=ph; }
+            else if(E>e2){ e2=E; th2=th; ph2=ph; }
+        }
+        if (e1 < EminP || e2 < EminP) return -999.0;
+        double dphiDeg = std::abs(TVector2::Phi_mpi_pi(ph2 - ph1))*TMath::RadToDeg();
+        if (std::abs(dphiDeg - 180.0) > 30.0) return -999.0;
+        return ph1; }, {"CalifaClusterData"})
+                         .Define("califa_th2", [](TClonesArray &clu)
+                                 {
+        const double EminClu = 20e3, EminP = 35e3;
+        double e1=-1., e2=-1., th1=-999., ph1=-999., th2=-999., ph2=-999.;
+        for (int i=0;i<clu.GetEntriesFast();++i){
+            auto *hit=(R3BCalifaClusterData*)clu.UncheckedAt(i);
+            double E=hit->GetEnergy(); if(E<EminClu) continue;
+            double th=hit->GetTheta(), ph=hit->GetPhi();
+            if(E>e1){ e2=e1; th2=th1; ph2=ph1; e1=E; th1=th; ph1=ph; }
+            else if(E>e2){ e2=E; th2=th; ph2=ph; }
+        }
+        if (e1 < EminP || e2 < EminP) return -999.0;
+        double dphiDeg = std::abs(TVector2::Phi_mpi_pi(ph2 - ph1))*TMath::RadToDeg();
+        if (std::abs(dphiDeg - 180.0) > 30.0) return -999.0;
+        return th2; }, {"CalifaClusterData"})
+                         .Define("califa_ph2", [](TClonesArray &clu)
+                                 {
+        const double EminClu = 20e3, EminP = 35e3;
+        double e1=-1., e2=-1., th1=-999., ph1=-999., th2=-999., ph2=-999.;
+        for (int i=0;i<clu.GetEntriesFast();++i){
+            auto *hit=(R3BCalifaClusterData*)clu.UncheckedAt(i);
+            double E=hit->GetEnergy(); if(E<EminClu) continue;
+            double th=hit->GetTheta(), ph=hit->GetPhi();
+            if(E>e1){ e2=e1; th2=th1; ph2=ph1; e1=E; th1=th; ph1=ph; }
+            else if(E>e2){ e2=E; th2=th; ph2=ph; }
+        }
+        if (e1 < EminP || e2 < EminP) return -999.0;
+        double dphiDeg = std::abs(TVector2::Phi_mpi_pi(ph2 - ph1))*TMath::RadToDeg();
+        if (std::abs(dphiDeg - 180.0) > 30.0) return -999.0;
+        return ph2; }, {"CalifaClusterData"})
+
+                         // Now map to L/R using the SAME swap for all four outputs
+                         .Define("califa_theta_L", [](bool swap, double th1, double th2)
+                                 {
+        if (th1 < -990.0 || th2 < -990.0) return -999.0;
+        return swap ? th2 : th1; }, {"califa_swap", "califa_th1", "califa_th2"})
+                         .Define("califa_phi_L", [](bool swap, double ph1, double ph2)
+                                 {
+        if (ph1 < -990.0 || ph2 < -990.0) return -999.0;
+        return swap ? ph2 : ph1; }, {"califa_swap", "califa_ph1", "califa_ph2"})
+                         .Define("califa_theta_R", [](bool swap, double th1, double th2)
+                                 {
+        if (th1 < -990.0 || th2 < -990.0) return -999.0;
+        return swap ? th1 : th2; }, {"califa_swap", "califa_th1", "califa_th2"})
+                         .Define("califa_phi_R", [](bool swap, double ph1, double ph2)
+                                 {
+        if (ph1 < -990.0 || ph2 < -990.0) return -999.0;
+        return swap ? ph1 : ph2; }, {"califa_swap", "califa_ph1", "califa_ph2"});
 
     auto df_califa_good = df_califa.Filter(
         [](double opa)
