@@ -253,19 +253,9 @@ void DataAnalysis::getData(bool called)
         Double_t gamma_frag = 1.0 / std::sqrt(1.0 - beta_frag * beta_frag);
         Double_t m_f = M_frag;
 
-        // TVector3 u_frag(fx_frag, fy_frag, 1.);
         TVector3 u_frag(px_frag, py_frag, pz_frag);
 
         u_frag = u_frag.Unit();
-
-        /*
-        std::cout << "Fragment \n";
-        std::cout << u_frag.X() << " " << fx_frag << std::endl;
-        std::cout << u_frag.Y() << " " << fy_frag << std::endl;
-        std::cout << u_frag.Z() << " " << 1. << std::endl;
-
-        std::cout << "====\n";
-        */
 
         Double_t p_frag_lab = gamma_frag * m_f * beta_frag;
         TVector3 pvec_frag_lab = u_frag * p_frag_lab;
@@ -273,12 +263,6 @@ void DataAnalysis::getData(bool called)
 
         P4_frag_lab.SetPxPyPzE(pvec_frag_lab.X(), pvec_frag_lab.Y(), pvec_frag_lab.Z(),
                                gamma_frag * m_f);
-
-        /*
-        px_frag = pvec_frag_lab.X();
-        py_frag = pvec_frag_lab.Y();
-        pz_frag = pvec_frag_lab.Z();
-        */
 
         // P4 of the incoming
         TVector3 u_proj(px_proj, py_proj, pz_proj);
@@ -423,7 +407,7 @@ void DataAnalysis::matchBeta()
 
         TF1 gaus("gaus_local", "gaus", xL, xR);
         gaus.SetParameters(amp0, mean0, sigma0);
-        gaus.SetParLimits(2, 1e-6, (xR - xL)); // sigma > 0, límite amplio
+        gaus.SetParLimits(2, 1e-6, (xR - xL));
 
         int fitStatus = fDeltaBeta->Fit(&gaus, "RQ0");
 
