@@ -1,10 +1,3 @@
-/*
-
-:setting: .txt file containing the paths of the files of the setting (e.g. 25F.txt)
-:reaction: name of the reaction to study (e.g. 25F23O)
-
-*/
-
 /////// Some constants ////////
 static constexpr double AMU_GeV = 0.93149410242;
 static constexpr double Z_FRAG = 8.;
