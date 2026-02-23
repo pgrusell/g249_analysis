@@ -1,634 +1,780 @@
-/////// Some constants ////////
+#include <array>
+#include <string>
+#include <vector>
+#include <fstream>
+#include <iostream>
+#include <stdexcept>
+#include <algorithm>
+#include <functional>
+#include <cmath>
+
+#include "TFile.h"
+#include "TSystem.h"
+#include "TString.h"
+#include "TVector3.h"
+#include "TVector2.h"
+#include "TLorentzVector.h"
+#include "TRandom3.h"
+#include "TMath.h"
+#include "TClonesArray.h"
+#include "ROOT/RDataFrame.hxx"
+
+// ─── Physical constants ─────────────────────────────────────────────────────
 static constexpr double AMU_GeV = 0.93149410242;
 static constexpr double Z_FRAG = 8.;
 static constexpr double SEL_Z_MIN = 7.6;
 static constexpr double SEL_Z_MAX = 8.5;
 static constexpr double MN_GeV = 0.939565420;
 static constexpr double C_CM_PER_NS = 29.9792458;
+static constexpr double FIB33_OFF = 25.;
+static constexpr double FIB31_OFF = -25.;
 
-/////// Helpers //////
+// ─── 25F incoming graphical cut (polygon from TCutG) ────────────────────────
+static const std::vector<std::pair<double, double>> INCOMING_25F_POLYGON = {
+    {2.77227, 8.55258},
+    {2.77403, 8.36228},
+    {2.77587, 8.24598},
+    {2.77849, 8.21426},
+    {2.78194, 8.31470},
+    {2.78276, 8.38871},
+    {2.78512, 8.69531},
+    {2.78587, 9.09178},
+    {2.78490, 9.36138},
+    {2.78295, 9.53582},
+    {2.78055, 9.77370},
+    {2.77834, 9.95344},
+    {2.77647, 10.10670},
+    {2.77534, 10.14900},
+    {2.77272, 10.11730},
+    {2.77059, 9.95344},
+    {2.76924, 9.71027},
+    {2.76905, 9.46182},
+    {2.76939, 9.19750},
+    {2.77014, 8.92791},
+    {2.77100, 8.74289},
+    {2.77182, 8.58959},
+    {2.77227, 8.55258}};
 
-// Trim helper
-static inline void trim_inplace(std::string &s)
-{
-    auto notSpace = [](unsigned char c)
-    { return !std::isspace(c); };
-    s.erase(s.begin(), std::find_if(s.begin(), s.end(), notSpace));
-    s.erase(std::find_if(s.rbegin(), s.rend(), notSpace).base(), s.end());
-}
-
-// Remove surrounding quotes "..."
-static inline void strip_quotes_inplace(std::string &s)
-{
-    if (s.size() >= 2 && ((s.front() == '"' && s.back() == '"') ||
-                          (s.front() == '\'' && s.back() == '\'')))
-    {
-        s = s.substr(1, s.size() - 2);
-    }
-}
-
-// Reads file list from text file: one path per line, optional quotes.
-// Supports comments starting with # (whole line) and inline " # comment" if you want.
-static std::vector<std::string> read_file_list(const std::string &txtPath)
-{
-    std::ifstream in(txtPath);
-    if (!in.is_open())
-        throw std::runtime_error("Cannot open file list: " + txtPath);
-
-    std::vector<std::string> files;
-    files.reserve(256);
-
-    std::string line;
-    while (std::getline(in, line))
-    {
-        // Remove inline comments starting with #
-        // (If you DON'T want inline comments, delete this block.)
-        auto hashPos = line.find('#');
-        if (hashPos != std::string::npos)
-            line = line.substr(0, hashPos);
-
-        trim_inplace(line);
-        if (line.empty())
-            continue;
-
-        strip_quotes_inplace(line);
-        trim_inplace(line);
-
-        if (!line.empty())
-            files.push_back(line);
-    }
-
-    if (files.empty())
-        throw std::runtime_error("File list is empty: " + txtPath);
-
-    return files;
-}
-
-bool isGoodIncoming(double AoQ, double Z, double minAoQ, double maxAoQ)
-{
-    return (Z >= 8.2 && Z <= 10.0 &&
-            AoQ >= minAoQ && AoQ <= maxAoQ);
-}
-
-bool isGoodFootTrack(TClonesArray *ft)
-{
-    static constexpr double Zmin[8] = {1, 1, 1, 8.5, 7.5, 1, 1, 1};
-    static constexpr double Zmax[8] = {10, 10, 10, 9.5, 8.5, 10, 10, 10};
-
-    for (int i = 0; i < 8; i++)
-    {
-        auto *h = (R3BFootHitData *)ft->UncheckedAt(i);
-
-        if (h->GetMulStrip() == 1)
-            continue;
-        if (h->GetDetId() - 1 != i)
-            return false;
-
-        double z = h->GetZCharge();
-        if (z < Zmin[i] || z > Zmax[i])
-            return false;
-    }
-    return true;
-}
+// ─── Structs ────────────────────────────────────────────────────────────────
 
 struct NFirst
 {
-    int idx;
-    double tns;
-    TVector3 pos;
+        int idx;
+        double tns;
+        TVector3 pos;
 };
 
-////////// MAIN FUNCTION ///////////
-
-void eventFilter(std::string setting = "", TString reaction = "", bool test = false, bool append = false)
+/// All PID / kinematic cuts for a single reaction channel.
+struct ReactionConfig
 {
+        double aoqOutMin = 0;
+        double aoqOutMax = 0;
+        double massAMU = 0;
+        std::string outName;
+        bool hasNeutrons = false;
+        bool isUnreacted = false;
 
-    ROOT::EnableImplicitMT(25);
+        // Optional elliptical outgoing-PID cut
+        bool useEllipse = false;
+        double ell_mu_AoQ = 0;
+        double ell_sig_AoQ = 0;
+        double ell_mu_Z = 0;
+        double ell_sig_Z = 0;
+        double ell_k = 0;
+};
 
-    ///////// Select the setting /////////
-    const std::string listTxt =
-        std::string(getenv("repopath")) + "/final/settings/" + setting;
+/// CALIFA top-2 cluster result
+struct Top2Clusters
+{
+        double e1, th1, ph1, e2, th2, ph2;
+        bool good;
+};
 
-    std::vector<std::string> files;
-    try
-    {
-        files = read_file_list(listTxt);
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "[ERROR] " << e.what() << "\n";
-        return;
-    }
+// ─── Free helpers ───────────────────────────────────────────────────────────
 
-    std::cout << "[OK] Loaded " << files.size() << " ROOT files from " << listTxt << "\n";
-
-    ///////// Select the reaction /////////
-    double SEL_AOQ_OUT_MIN = 0;
-    double SEL_AOQ_OUT_MAX = 0;
-    double SEL_AOQ_IN_MIN = 0;
-    double SEL_AOQ_IN_MAX = 0;
-    std::string outFileName = "";
-    double MASS_AMU = 0;
-    bool hasNeutrons = false;
-
-    if (reaction == "25F23O")
-    {
-        SEL_AOQ_OUT_MIN = 2.8;
-        SEL_AOQ_OUT_MAX = 2.88;
-        SEL_AOQ_IN_MIN = 2.77;
-        SEL_AOQ_IN_MAX = 2.79;
-
-        outFileName = "data_23O";
-        MASS_AMU = 23.015696686 - 8 * 0.00511;
-        hasNeutrons = true;
-    }
-
-    if (reaction == "25F22O")
-    {
-        SEL_AOQ_OUT_MIN = 2.67;
-        SEL_AOQ_OUT_MAX = 2.76;
-        SEL_AOQ_IN_MIN = 2.77;
-        SEL_AOQ_IN_MAX = 2.79;
-
-        outFileName = "data_22O";
-        MASS_AMU = 22.009965744 - 8.0 * 0.00511;
-        hasNeutrons = true;
-    }
-
-    if (reaction == "25F24O")
-    {
-        SEL_AOQ_OUT_MIN = 2.9;
-        SEL_AOQ_OUT_MAX = 3.;
-        SEL_AOQ_IN_MIN = 2.77;
-        SEL_AOQ_IN_MAX = 2.79;
-
-        outFileName = "data_24O";
-        MASS_AMU = 24.019861000 - 8 * 0.00511;
-        hasNeutrons = false;
-    }
-
-    if (test)
-        outFileName += "_test";
-
-    outFileName += ".root";
-
-    // Other cases
-    if (outFileName.empty() || MASS_AMU <= 0.0 || (SEL_AOQ_IN_MAX <= SEL_AOQ_IN_MIN))
-    {
-        std::cerr << "[ERROR] Unknown/invalid reaction: " << reaction << "\n";
-        return;
-    }
-
-    double M_FRAG_GeV = MASS_AMU * AMU_GeV;
-
-    /////////// Extract data from the rootfile /////////
-    std::string outFile = std::string(getenv("repopath")) +
-                          "/results/final/" + outFileName;
-
-    bool exists = (gSystem->AccessPathName(outFile.c_str()) == kFALSE);
-
-    TFile *fout = nullptr;
-    if (!append || !exists)
-        fout = new TFile(outFile.c_str(), "RECREATE");
-    else
-        fout = new TFile(outFile.c_str(), "UPDATE");
-
-    ROOT::RDataFrame df("evt", files);
-
-    // Select
-    ROOT::RDF::RNode base = df
-                                .Filter([](TClonesArray &f)
-                                        { return f.GetEntriesFast() > 0; }, {"FrsData"})
-                                .Filter([](TClonesArray &m)
-                                        { return m.GetEntriesFast() > 0; }, {"FragmentMDFTrack"})
-                                .Filter([](TClonesArray &it)
-                                        { return it.GetEntriesFast() > 0; }, {"IncomingTrackFoot"})
-                                .Filter([](TClonesArray &c)
-                                        { return c.GetEntriesFast() >= 2; }, {"CalifaClusterData"});
-
-    ROOT::RDF::RNode df_cut = base;
-    if (hasNeutrons)
-        df_cut = df_cut.Filter([](TClonesArray &n)
-                               { return n.GetEntriesFast() > 0; }, {"NeulandHits"});
-
-    // Select the incoming in the FRS
-    auto df_frs = df_cut
-                      .Define("in_AoQ", [](TClonesArray &f)
-                              { return ((R3BFrsData *)f.UncheckedAt(0))->GetAq(); }, {"FrsData"})
-                      .Define("in_Z", [](TClonesArray &f)
-                              { return ((R3BFrsData *)f.UncheckedAt(0))->GetZ(); }, {"FrsData"})
-                      .Define("beta_proj", [](TClonesArray &f)
-                              {
-                                  auto *frs = (R3BFrsData *)f.UncheckedAt(0);
-                                  return frs->GetBeta(); // ajusta el nombre si es distinto
-                              },
-                              {"FrsData"})
-                      .Filter([&](double aoq, double z)
-                              { return isGoodIncoming(aoq, z, SEL_AOQ_IN_MIN, SEL_AOQ_IN_MAX); }, {"in_AoQ", "in_Z"});
-
-    // Kinematics of the fragment from the MDF
-    auto df_frag = df_frs
-                       .Define("frag", [](TClonesArray &m)
-                               { return (R3BTrackingParticle *)m.UncheckedAt(0); },
-                               {"FragmentMDFTrack"})
-
-                       // PID from MDF data
-                       .Define("AoQ_frag", [](R3BTrackingParticle *t)
-                               { return (double)t->GetMass(); },
-                               {"frag"})
-                       .Define("Z_frag_est", [](R3BTrackingParticle *t)
-                               { return (double)t->GetCharge(); },
-                               {"frag"})
-                       .Define("A_frag", [](double aoq, double z)
-                               { return aoq * z; },
-                               {"AoQ_frag", "Z_frag_est"})
-
-                       // P/Q from MDF
-                       .Define("P_frag_PoQ_vec", [](R3BTrackingParticle *t)
-                               {
-                                   return t->GetStartMomentum(); // asumido P/Q
-                               },
-                               {"frag"})
-                       .Define("P_over_Q_frag", [](const TVector3 &pvec)
-                               { return pvec.Mag(); }, {"P_frag_PoQ_vec"})
-                       .Define("P_frag_dir", [](const TVector3 &pvec)
-                               { return pvec.Mag() > 0 ? pvec.Unit() : TVector3(0, 0, 1); }, {"P_frag_PoQ_vec"})
-
-                       // Momentum of the incoming proyectile from IncomingFoots
-                       .Define("P_in_vec", [](TClonesArray &it)
-                               {
-                                   auto *trk = (R3BTrackingParticle *)it.UncheckedAt(0);
-                                   return trk->GetStartMomentum(); }, {"IncomingTrackFoot"})
-                       .Define("px_in", [](const TVector3 &p)
-                               { return p.X(); }, {"P_in_vec"})
-                       .Define("py_in", [](const TVector3 &p)
-                               { return p.Y(); }, {"P_in_vec"})
-                       .Define("pz_in", [](const TVector3 &p)
-                               { return p.Z(); }, {"P_in_vec"})
-
-                       // Z fixed for the fragment (not the stimated from the MDF!)
-                       .Define("Z_frag", []()
-                               { return Z_FRAG; }, {})
-
-                       // Fixed mass of the fragment (not the retrived from the MDF!)
-                       .Define("M_frag", [&]()
-                               { return M_FRAG_GeV; }, {})
-
-                       // Module of the momentum p = (P/Q) * Z
-                       .Define("p_frag", [](double poverq, double Z)
-                               {
-                                   if (poverq <= 0.0 || Z <= 0.0)
-                                       return 0.0;
-                                   return poverq * Z; }, {"P_over_Q_frag", "Z_frag"})
-
-                       // Beta calculated from p and M (not from FRS)
-                       .Define("beta_frag", [](double p, double M)
-                               {
-                                   if (p <= 0.0 || M <= 0.0)
-                                       return 0.0;
-                                   double E = std::sqrt(p * p + M * M);
-                                   return p / E; }, {"p_frag", "M_frag"})
-
-                       // Momentum 4-vector
-                       .Define("P4_frag", [](double p, double Mf, const TVector3 &dir)
-                               {
-                                   if (p <= 0.0)
-                                       return TLorentzVector(0, 0, 0, 0);
-
-                                   TVector3 pvec = dir * p;
-                                   double E = std::sqrt(p * p + Mf * Mf);  // E = sqrt(p^2 + M^2)
-                                   return TLorentzVector(pvec, E); }, {"p_frag", "M_frag", "P_frag_dir"});
-
-    // Select only the fragment that we want
-    auto df_frag_filtered = df_frag.Filter(
-        [&](double aoq, double z)
+/// Thread-safe point-in-polygon test (ray-casting algorithm).
+static bool isInsidePolygon(double x, double y,
+                            const std::vector<std::pair<double, double>> &poly)
+{
+        bool inside = false;
+        const int n = (int)poly.size();
+        for (int i = 0, j = n - 1; i < n; j = i++)
         {
-            return (aoq >= SEL_AOQ_OUT_MIN && aoq <= SEL_AOQ_OUT_MAX &&
-                    z >= SEL_Z_MIN && z <= SEL_Z_MAX);
-        },
-        {"AoQ_frag", "Z_frag_est"});
+                double xi = poly[i].first, yi = poly[i].second;
+                double xj = poly[j].first, yj = poly[j].second;
+                if (((yi > y) != (yj > y)) &&
+                    (x < (xj - xi) * (y - yi) / (yj - yi) + xi))
+                        inside = !inside;
+        }
+        return inside;
+}
 
-    // Nuetron variables (if any)
-    ROOT::RDF::RNode df_p4n = df_frag_filtered;
+static bool insideEllipse(double aoq, double z,
+                          double mu_AoQ, double sig_AoQ,
+                          double mu_Z, double sig_Z, double k)
+{
+        double d2 = std::pow((aoq - mu_AoQ) / sig_AoQ, 2) +
+                    std::pow((z - mu_Z) / sig_Z, 2);
+        return d2 < k * k;
+}
 
-    if (hasNeutrons)
-    {
-        // Select the first neutron in Neuland
-        auto df_n = df_frag_filtered
-                        .Define("n_first", [](TClonesArray &nl)
-                                {
-                int idx = -1;
-                double bestZ = 1e99;
-                TVector3 bestPos(0, 0, 0);
-                double bestT = -1;
+static inline void trim_inplace(std::string &s)
+{
+        auto notSpace = [](unsigned char c)
+        { return !std::isspace(c); };
+        s.erase(s.begin(), std::find_if(s.begin(), s.end(), notSpace));
+        s.erase(std::find_if(s.rbegin(), s.rend(), notSpace).base(), s.end());
+}
 
-                const int n = nl.GetEntriesFast();
-                for (int i = 0; i < n; i++)
+static inline void strip_quotes_inplace(std::string &s)
+{
+        if (s.size() >= 2 &&
+            ((s.front() == '"' && s.back() == '"') ||
+             (s.front() == '\'' && s.back() == '\'')))
+                s = s.substr(1, s.size() - 2);
+}
+
+static std::vector<std::string> read_file_list(const std::string &txtPath)
+{
+        std::ifstream in(txtPath);
+        if (!in.is_open())
+                throw std::runtime_error("Cannot open file list: " + txtPath);
+
+        std::vector<std::string> files;
+        files.reserve(256);
+        std::string line;
+
+        while (std::getline(in, line))
+        {
+                auto hashPos = line.find('#');
+                if (hashPos != std::string::npos)
+                        line = line.substr(0, hashPos);
+                trim_inplace(line);
+                if (line.empty())
+                        continue;
+                strip_quotes_inplace(line);
+                trim_inplace(line);
+                if (!line.empty())
+                        files.push_back(line);
+        }
+
+        if (files.empty())
+                throw std::runtime_error("File list is empty: " + txtPath);
+        return files;
+}
+
+/// Incoming 25F selection using the graphical cut polygon (thread-safe).
+static bool isGoodIncoming(double AoQ, double Z)
+{
+        return isInsidePolygon(AoQ, Z, INCOMING_25F_POLYGON);
+}
+
+// ─── Reaction configuration factory ────────────────────────────────────────
+
+static ReactionConfig makeReactionConfig(const TString &reaction)
+{
+        ReactionConfig cfg;
+
+        if (reaction == "25F23O")
+        {
+                cfg = {2.785, 2.88,
+                       23.015696686 - 8 * 0.00511,
+                       "data_23O", true, false};
+        }
+        else if (reaction == "25F22O")
+        {
+                cfg = {2.67, 2.755,
+                       22.009965744 - 8.0 * 0.00511,
+                       "data_22O", true, false};
+        }
+        else if (reaction == "25F24O")
+        {
+                cfg = {2.89, 3.02,
+                       24.019861000 - 8 * 0.00511,
+                       "data_24O", false, false,
+                       true, 2.95766, 0.0221273, 8.06447, 0.201233, 3.};
+        }
+        else if (reaction == "25Fp2p")
+        {
+                std::cout << "[WARN] Testing only - not for kinematic extraction.\n";
+                cfg = {2.3, 3.1,
+                       24.019861000 - 8 * 0.00511,
+                       "data_25Fp2p", false, false};
+        }
+        else if (reaction == "25F25F")
+        {
+                cfg = {2.71, 2.77,
+                       1.0 /* dummy */,
+                       "data_25F", false, true,
+                       true, 2.740, 0.00988, 8.976, 0.1973, 3.};
+        }
+
+        return cfg;
+}
+
+// ─── Reusable RDataFrame column builders ────────────────────────────────────
+
+/// FRS incoming columns + filter (now uses graphical cut polygon)
+static ROOT::RDF::RNode defineFrsIncoming(ROOT::RDF::RNode node)
+{
+        return node
+            .Define("in_AoQ", [](TClonesArray &f)
+                    { return ((R3BFrsData *)f.UncheckedAt(0))->GetAq(); }, {"FrsData"})
+            .Define("in_Z", [](TClonesArray &f)
+                    { return ((R3BFrsData *)f.UncheckedAt(0))->GetZ(); }, {"FrsData"})
+            .Define("beta_proj", [](TClonesArray &f)
+                    { return ((R3BFrsData *)f.UncheckedAt(0))->GetBeta(); }, {"FrsData"})
+            .Filter([](double aoq, double z)
+                    { return isGoodIncoming(aoq, z); },
+                    {"in_AoQ", "in_Z"}, "incoming 25F graphical cut");
+}
+
+/// Outgoing fragment PID from MDF
+static ROOT::RDF::RNode defineFragmentPID(ROOT::RDF::RNode node)
+{
+        return node
+            .Define("frag", [](TClonesArray &m)
+                    { return (R3BTrackingParticle *)m.UncheckedAt(0); }, {"FragmentMDFTrack"})
+            .Define("AoQ_frag", [](R3BTrackingParticle *t)
+                    { return (double)t->GetMass(); }, {"frag"})
+            .Define("Z_frag_est", [](R3BTrackingParticle *t)
+                    { return (double)t->GetCharge(); }, {"frag"});
+}
+
+/// FOOT charge (foot_z_1..8) and position (PosFoot5..8) using GetHitIndexByName
+static ROOT::RDF::RNode defineFootColumns(ROOT::RDF::RNode node)
+{
+        // Charge array: feet 1-4 from IncomingTrackFoot, feet 5-8 from OutgoingTrackFoot
+        node = node.Define("foot_z_arr",
+                           [](TClonesArray &infoot, TClonesArray &outfoot, TClonesArray &hitFoot)
+                           {
+                std::array<double, 8> z;
+                z.fill(-1.0);
+
+                // Feet 1-4 from IncomingTrackFoot
+                if (infoot.GetEntriesFast() > 0)
                 {
-                    auto *h = static_cast<R3BNeulandHit *>(nl.UncheckedAt(i));
-
-                    const double z = h->GetPosition().Z();
-                    const double t = h->GetT();
-
-                    // First hit in plane inside the time window
-                    if (t <= 76.0 && z < bestZ)
-                    //if (t >= 0 && z < bestZ)
+                    auto *trk = static_cast<R3BTrackingParticle *>(infoot.UncheckedAt(0));
+                    for (int i = 0; i < 4; ++i)
                     {
-                        bestZ  = z;
-                        bestT  = t;
-                        idx    = i;
-
-                        TVector3 pos = h->GetPosition();
-                        TVector3 posSmear = pos;
-
-                        const int paddle = h->GetPaddle();
-
-                        // X and Y are the central value by default in the Cal2clust
-                        // task for vertical and horizontal bars respectively.
-                        static thread_local TRandom3 rng(0);
-
-                        if ( ((paddle / 50) % 2) == 0 )
+                        int idx = trk->GetHitIndexByName(Form("foot%d", i + 1));
+                        if (idx >= 0 && idx < hitFoot.GetEntriesFast())
                         {
-                            // vertical bars smear en Y y Z
-                            posSmear.SetXYZ(
-                                pos.X(),
-                                pos.Y() + rng.Uniform(-2.5, 2.5),
-                                pos.Z() + rng.Uniform(-2.5, 2.5)
-                            );
+                            auto *h = static_cast<R3BFootHitData *>(hitFoot.UncheckedAt(idx));
+                            z[i] = h->GetZCharge();
                         }
-                        else
-                        {
-                            // horizontal bars smear en X y Z
-                            posSmear.SetXYZ(
-                                pos.X() + rng.Uniform(-2.5, 2.5),
-                                pos.Y(),
-                                pos.Z() + rng.Uniform(-2.5, 2.5)
-                            );
-                        }
-
-                        bestPos = posSmear;
                     }
                 }
 
-                return NFirst{idx, bestT, bestPos}; },
-                                {"NeulandHits"})
-                        .Filter([](const NFirst &nf)
-                                { return nf.idx >= 0; },
-                                {"n_first"});
+                // Feet 5-8 from OutgoingTrackFoot
+                if (outfoot.GetEntriesFast() > 0)
+                {
+                    auto *trk = static_cast<R3BTrackingParticle *>(outfoot.UncheckedAt(0));
+                    for (int i = 4; i < 8; ++i)
+                    {
+                        int idx = trk->GetHitIndexByName(Form("foot%d", i + 1));
+                        if (idx >= 0 && idx < hitFoot.GetEntriesFast())
+                        {
+                            auto *h = static_cast<R3BFootHitData *>(hitFoot.UncheckedAt(idx));
+                            z[i] = h->GetZCharge();
+                        }
+                    }
+                }
 
-        // Calculate beta of the neutron
-        auto df_bn = df_n
-                         .Define("beta_neu", [](const NFirst &nf)
-                                 {
-                             double L = nf.pos.Mag();
-                             double t = nf.tns;
-                             if (L <= 0 || t <= 0)
-                                 return -1.0;
-                             return L / (C_CM_PER_NS * t); },
-                                 {"n_first"})
-                         .Filter([](double b)
-                                 { return b > 0 && b < 1; },
-                                 {"beta_neu"});
+                return z; }, {"IncomingTrackFoot", "OutgoingTrackFoot", "FootHitData"});
 
-        // Neutron direction
-        auto df_dir = df_bn.Define(
-            "n_dir", [](const NFirst &nf)
-            { return nf.pos.Mag() > 0 ? nf.pos.Unit() : TVector3(0, 0, 1); },
-            {"n_first"});
+        for (int i = 0; i < 8; ++i)
+        {
+                const int idx = i;
+                node = node.Define(Form("foot_z_%d", i + 1),
+                                   [idx](const std::array<double, 8> &z)
+                                   { return z[idx]; },
+                                   {"foot_z_arr"});
+        }
 
-        // Calculate 4-momentum of the neutron
-        df_p4n = df_dir
-                     .Define("p_neu", [](double bn)
-                             {
-                        double g = 1.0 / std::sqrt(1.0 - bn * bn);
-                        return g * MN_GeV * bn; },
-                             {"beta_neu"})
-                     .Define("P4_neu", [](double p, const TVector3 &dir, double bn)
-                             {
-                        double g = 1.0 / std::sqrt(1.0 - bn * bn);
-                        TVector3 P = dir * p;
-                        return TLorentzVector(P, g * MN_GeV); },
-                             {"p_neu", "n_dir", "beta_neu"});
-    }
+        // Positions for feet 5-8 from OutgoingTrackFoot
+        node = node.Define("foot_pos_arr",
+                           [](TClonesArray &outfoot, TClonesArray &hitFoot)
+                           {
+                std::array<double, 8> pos;
+                pos.fill(-999.0);
 
-    // CALIFA opening angle and cluster angles
-    auto df_califa = df_p4n
-                         .Define("califa_opa", [](TClonesArray &clu)
-                                 {
-        double opa = -999.0;
+                if (outfoot.GetEntriesFast() > 0)
+                {
+                    auto *trk = static_cast<R3BTrackingParticle *>(outfoot.UncheckedAt(0));
+                    for (int i = 4; i < 8; ++i)
+                    {
+                        int idx = trk->GetHitIndexByName(Form("foot%d", i + 1));
+                        if (idx >= 0 && idx < hitFoot.GetEntriesFast())
+                        {
+                            auto *h = static_cast<R3BFootHitData *>(hitFoot.UncheckedAt(idx));
+                            pos[i] = h->GetPos();
+                        }
+                    }
+                }
 
-        // Define thresholds for the clusters
-        const double EminClu = 20e3;   // 20 keV prefilter
-        const double EminP   = 35e3;   // 35 keV for the selected two
+                return pos; }, {"OutgoingTrackFoot", "FootHitData"});
 
-        // Select the two higher energy clusters
-        double e1=-1., e2=-1.;
-        double th1=-999., ph1=-999.;
-        double th2=-999., ph2=-999.;
+        for (int i = 4; i < 8; ++i)
+        {
+                const int idx = i;
+                node = node.Define(Form("PosFoot%d", i + 1),
+                                   [idx](const std::array<double, 8> &p)
+                                   { return p[idx]; },
+                                   {"foot_pos_arr"});
+        }
+
+        return node;
+}
+
+/// Generic best-hit extractor for a single fiber detector using GetHitIndexByName.
+static ROOT::RDF::RNode defineSingleFiber(ROOT::RDF::RNode node,
+                                          const std::string &hitBranch,
+                                          const std::string &prefix,
+                                          const std::string &elossName,
+                                          double xOffset,
+                                          const std::string &trackBranch,
+                                          const std::string &hitName)
+{
+        const std::string arrCol = prefix + "_best";
+
+        node = node.Define(arrCol,
+                           [xOffset, hitName](TClonesArray &trks, TClonesArray &hits)
+                           {
+                std::array<double, 3> res = {-999.0, -999.0, -999.0};
+
+                if (trks.GetEntriesFast() > 0)
+                {
+                    auto *trk = static_cast<R3BTrackingParticle *>(trks.UncheckedAt(0));
+                    int idx = trk->GetHitIndexByName(hitName.c_str());
+                    if (idx >= 0 && idx < hits.GetEntriesFast())
+                    {
+                        auto *hit = static_cast<R3BFiberMAPMTHitData *>(hits.UncheckedAt(idx));
+                        res = {hit->GetX() + xOffset, hit->GetY(), hit->GetEloss()};
+                    }
+                }
+
+                return res; }, {trackBranch, hitBranch});
+
+        node = node.Define(prefix + "X",
+                           [](const std::array<double, 3> &a)
+                           { return a[0]; }, {arrCol})
+                   .Define(prefix + "Y",
+                           [](const std::array<double, 3> &a)
+                           { return a[1]; }, {arrCol})
+                   .Define(elossName,
+                           [](const std::array<double, 3> &a)
+                           { return a[2]; }, {arrCol});
+        return node;
+}
+
+/// All four fiber detectors + ToFD
+static ROOT::RDF::RNode defineFibersAndTofd(ROOT::RDF::RNode node)
+{
+        // Fi30 and Fi31: incoming fibers -> IncomingTrackFoot
+        node = defineSingleFiber(node, "Fi30Hit", "fib30", "ElossFib30", 0.0,
+                                 "IncomingTrackFoot", "Fi30Hit");
+        node = defineSingleFiber(node, "Fi31Hit", "fib31", "ElossFib31", FIB31_OFF,
+                                 "IncomingTrackFoot", "Fi31Hit");
+
+        // Fi32 and Fi33: outgoing fibers -> OutgoingTrackFoot
+        node = defineSingleFiber(node, "Fi32Hit", "fib32", "ElossFib32", 0.0,
+                                 "OutgoingTrackFoot", "Fi32Hit");
+        node = defineSingleFiber(node, "Fi33Hit", "fib33", "ElossFib33", FIB33_OFF,
+                                 "OutgoingTrackFoot", "Fi33Hit");
+
+        node = node.Define("tofdX", [](TClonesArray &t)
+                           {
+        for (int i = 0; i < t.GetEntriesFast(); ++i) {
+            auto *h = (R3BTofdHitData *)t.UncheckedAt(i);
+            if (h->GetDetId() == 1) return (double)h->GetX();
+        }
+        return -999.0; }, {"TofdHit"});
+
+        return node;
+}
+
+/// Outgoing start position from OutgoingTrackFoot
+static ROOT::RDF::RNode defineOutgoingStartPos(ROOT::RDF::RNode node)
+{
+        return node
+            .Define("out_startpos", [](TClonesArray &ot)
+                    {
+            std::array<double, 3> res = {-999.0, -999.0, -999.0};
+            if (ot.GetEntriesFast() > 0) {
+                auto *trk = (R3BTrackingParticle *)ot.UncheckedAt(0);
+                TVector3 pos = trk->GetStartPosition();
+                res = {pos.X(), pos.Y(), pos.Z()};
+            }
+            return res; }, {"OutgoingTrackFoot"})
+            .Define("out_startX", [](const std::array<double, 3> &p)
+                    { return p[0]; }, {"out_startpos"})
+            .Define("out_startY", [](const std::array<double, 3> &p)
+                    { return p[1]; }, {"out_startpos"})
+            .Define("out_startZ", [](const std::array<double, 3> &p)
+                    { return p[2]; }, {"out_startpos"});
+}
+
+// ─── CALIFA ─────────────────────────────────────────────────────────────────
+
+static Top2Clusters findTop2Clusters(TClonesArray &clu,
+                                     double EminClu = 20e3,
+                                     double EminP = 20e3)
+{
+        Top2Clusters c{-1, -999, -999, -1, -999, -999, false};
 
         for (int i = 0; i < clu.GetEntriesFast(); ++i)
         {
-            auto *hit = (R3BCalifaClusterData *)clu.UncheckedAt(i);
-            const double E = hit->GetEnergy();
-            if (E < EminClu) continue;
+                auto *hit = (R3BCalifaClusterData *)clu.UncheckedAt(i);
+                double E = hit->GetEnergy();
+                if (E < EminClu)
+                        continue;
+                double th = hit->GetTheta(), ph = hit->GetPhi();
 
-            const double th = hit->GetTheta();
-            const double ph = hit->GetPhi();
-
-            if (E > e1) { e2=e1; th2=th1; ph2=ph1; e1=E; th1=th; ph1=ph; }
-            else if (E > e2) { e2=E; th2=th; ph2=ph; }
+                if (E > c.e1)
+                {
+                        c.e2 = c.e1;
+                        c.th2 = c.th1;
+                        c.ph2 = c.ph1;
+                        c.e1 = E;
+                        c.th1 = th;
+                        c.ph1 = ph;
+                }
+                else if (E > c.e2)
+                {
+                        c.e2 = E;
+                        c.th2 = th;
+                        c.ph2 = ph;
+                }
         }
 
-        if (e1 < EminP || e2 < EminP) return opa;
+        if (c.e1 < EminP || c.e2 < EminP)
+                return c;
 
-        // Ask for the clusters to be coplanars (+- 30 deg)
-        const double dphi = TVector2::Phi_mpi_pi(ph2 - ph1);
-        const double dphiDeg = std::abs(dphi) * TMath::RadToDeg();
-        if (std::abs(dphiDeg - 180.0) > 30.0) return opa;
+        double dphiDeg = std::abs(TVector2::Phi_mpi_pi(c.ph2 - c.ph1)) * TMath::RadToDeg();
+        if (std::abs(dphiDeg - 180.0) > 30.0)
+                return c;
 
-        TVector3 v1; v1.SetMagThetaPhi(1.0, th1, ph1);
-        TVector3 v2; v2.SetMagThetaPhi(1.0, th2, ph2);
-        opa = v1.Angle(v2); // rad
+        c.good = true;
+        return c;
+}
 
-        return opa; }, {"CalifaClusterData"})
-                         .Define("califa_swap", []()
-                                 {
-        
-        // Save theta and phi of the clusters
-        // Following lines are just a way to randomly asigned cluster1 and cluster2
-        // If we do it by energy we (maybe) can bias the phi1 vs phi2 plot.
-        static thread_local TRandom3 rng(0);
-        return rng.Rndm() < 0.5; })
-                         .Define("califa_th1", [](TClonesArray &clu)
-                                 {
-        const double EminClu = 20e3, EminP = 35e3;
-        double e1=-1., e2=-1., th1=-999., ph1=-999., th2=-999., ph2=-999.;
-        for (int i=0;i<clu.GetEntriesFast();++i){
-            auto *hit=(R3BCalifaClusterData*)clu.UncheckedAt(i);
-            double E=hit->GetEnergy(); if(E<EminClu) continue;
-            double th=hit->GetTheta(), ph=hit->GetPhi();
-            if(E>e1){ e2=e1; th2=th1; ph2=ph1; e1=E; th1=th; ph1=ph; }
-            else if(E>e2){ e2=E; th2=th; ph2=ph; }
-        }
-        if (e1 < EminP || e2 < EminP) return -999.0;
-        double dphiDeg = std::abs(TVector2::Phi_mpi_pi(ph2 - ph1))*TMath::RadToDeg();
-        if (std::abs(dphiDeg - 180.0) > 30.0) return -999.0;
-        return th1; }, {"CalifaClusterData"})
-                         .Define("califa_ph1", [](TClonesArray &clu)
-                                 {
-        const double EminClu = 20e3, EminP = 35e3;
-        double e1=-1., e2=-1., th1=-999., ph1=-999., th2=-999., ph2=-999.;
-        for (int i=0;i<clu.GetEntriesFast();++i){
-            auto *hit=(R3BCalifaClusterData*)clu.UncheckedAt(i);
-            double E=hit->GetEnergy(); if(E<EminClu) continue;
-            double th=hit->GetTheta(), ph=hit->GetPhi();
-            if(E>e1){ e2=e1; th2=th1; ph2=ph1; e1=E; th1=th; ph1=ph; }
-            else if(E>e2){ e2=E; th2=th; ph2=ph; }
-        }
-        if (e1 < EminP || e2 < EminP) return -999.0;
-        double dphiDeg = std::abs(TVector2::Phi_mpi_pi(ph2 - ph1))*TMath::RadToDeg();
-        if (std::abs(dphiDeg - 180.0) > 30.0) return -999.0;
-        return ph1; }, {"CalifaClusterData"})
-                         .Define("califa_th2", [](TClonesArray &clu)
-                                 {
-        const double EminClu = 20e3, EminP = 35e3;
-        double e1=-1., e2=-1., th1=-999., ph1=-999., th2=-999., ph2=-999.;
-        for (int i=0;i<clu.GetEntriesFast();++i){
-            auto *hit=(R3BCalifaClusterData*)clu.UncheckedAt(i);
-            double E=hit->GetEnergy(); if(E<EminClu) continue;
-            double th=hit->GetTheta(), ph=hit->GetPhi();
-            if(E>e1){ e2=e1; th2=th1; ph2=ph1; e1=E; th1=th; ph1=ph; }
-            else if(E>e2){ e2=E; th2=th; ph2=ph; }
-        }
-        if (e1 < EminP || e2 < EminP) return -999.0;
-        double dphiDeg = std::abs(TVector2::Phi_mpi_pi(ph2 - ph1))*TMath::RadToDeg();
-        if (std::abs(dphiDeg - 180.0) > 30.0) return -999.0;
-        return th2; }, {"CalifaClusterData"})
-                         .Define("califa_ph2", [](TClonesArray &clu)
-                                 {
-        const double EminClu = 20e3, EminP = 35e3;
-        double e1=-1., e2=-1., th1=-999., ph1=-999., th2=-999., ph2=-999.;
-        for (int i=0;i<clu.GetEntriesFast();++i){
-            auto *hit=(R3BCalifaClusterData*)clu.UncheckedAt(i);
-            double E=hit->GetEnergy(); if(E<EminClu) continue;
-            double th=hit->GetTheta(), ph=hit->GetPhi();
-            if(E>e1){ e2=e1; th2=th1; ph2=ph1; e1=E; th1=th; ph1=ph; }
-            else if(E>e2){ e2=E; th2=th; ph2=ph; }
-        }
-        if (e1 < EminP || e2 < EminP) return -999.0;
-        double dphiDeg = std::abs(TVector2::Phi_mpi_pi(ph2 - ph1))*TMath::RadToDeg();
-        if (std::abs(dphiDeg - 180.0) > 30.0) return -999.0;
-        return ph2; }, {"CalifaClusterData"})
+static ROOT::RDF::RNode defineCalifaColumns(ROOT::RDF::RNode node)
+{
+        node = node
+                   .Define("califa_top2", [](TClonesArray &clu)
+                           { return findTop2Clusters(clu); },
+                           {"CalifaClusterData"})
+                   .Define("califa_opa", [](const Top2Clusters &c)
+                           {
+            if (!c.good) return -999.0;
+            TVector3 v1; v1.SetMagThetaPhi(1.0, c.th1, c.ph1);
+            TVector3 v2; v2.SetMagThetaPhi(1.0, c.th2, c.ph2);
+            return v1.Angle(v2); }, {"califa_top2"})
+                   .Define("califa_swap", []()
+                           {
+            static thread_local TRandom3 rng(0);
+            return rng.Rndm() < 0.5; })
+                   .Define("califa_theta_L", [](bool sw, const Top2Clusters &c)
+                           { return (!c.good) ? -999.0 : (sw ? c.th2 : c.th1); }, {"califa_swap", "califa_top2"})
+                   .Define("califa_phi_L", [](bool sw, const Top2Clusters &c)
+                           { return (!c.good) ? -999.0 : (sw ? c.ph2 : c.ph1); }, {"califa_swap", "califa_top2"})
+                   .Define("califa_theta_R", [](bool sw, const Top2Clusters &c)
+                           { return (!c.good) ? -999.0 : (sw ? c.th1 : c.th2); }, {"califa_swap", "califa_top2"})
+                   .Define("califa_phi_R", [](bool sw, const Top2Clusters &c)
+                           { return (!c.good) ? -999.0 : (sw ? c.ph1 : c.ph2); }, {"califa_swap", "califa_top2"});
 
-                         .Define("califa_theta_L", [](bool swap, double th1, double th2)
-                                 {
-        if (th1 < -990.0 || th2 < -990.0) return -999.0;
-        return swap ? th2 : th1; }, {"califa_swap", "califa_th1", "califa_th2"})
-                         .Define("califa_phi_L", [](bool swap, double ph1, double ph2)
-                                 {
-        if (ph1 < -990.0 || ph2 < -990.0) return -999.0;
-        return swap ? ph2 : ph1; }, {"califa_swap", "califa_ph1", "califa_ph2"})
-                         .Define("califa_theta_R", [](bool swap, double th1, double th2)
-                                 {
-        if (th1 < -990.0 || th2 < -990.0) return -999.0;
-        return swap ? th1 : th2; }, {"califa_swap", "califa_th1", "califa_th2"})
-                         .Define("califa_phi_R", [](bool swap, double ph1, double ph2)
-                                 {
-        if (ph1 < -990.0 || ph2 < -990.0) return -999.0;
-        return swap ? ph1 : ph2; }, {"califa_swap", "califa_ph1", "califa_ph2"});
+        return node.Filter([](double opa)
+                           { return opa > -990.0; },
+                           {"califa_opa"}, "good CALIFA event");
+}
 
-    auto df_califa_good = df_califa.Filter(
-        [](double opa)
+// ─── Neutrons ───────────────────────────────────────────────────────────────
+
+static ROOT::RDF::RNode defineNeutronColumns(ROOT::RDF::RNode node)
+{
+        return node
+            .Define("n_first", [](TClonesArray &nl)
+                    {
+            int idx = -1;  double bestZ = 1e99, bestT = -1;
+            TVector3 bestPos(0, 0, 0);
+            for (int i = 0; i < nl.GetEntriesFast(); ++i)
+            {
+                auto *h = static_cast<R3BNeulandHit *>(nl.UncheckedAt(i));
+                double z = h->GetPosition().Z(), t = h->GetT();
+                if (t <= 76.0 && z < bestZ)
+                {
+                    bestZ = z;  bestT = t;  idx = i;
+                    TVector3 pos = h->GetPosition();
+                    int paddle = h->GetPaddle();
+                    static thread_local TRandom3 rng(0);
+                    if (((paddle / 50) % 2) == 0)
+                        bestPos.SetXYZ(pos.X(),
+                                       pos.Y() + rng.Uniform(-2.5, 2.5),
+                                       pos.Z() + rng.Uniform(-2.5, 2.5));
+                    else
+                        bestPos.SetXYZ(pos.X() + rng.Uniform(-2.5, 2.5),
+                                       pos.Y(),
+                                       pos.Z() + rng.Uniform(-2.5, 2.5));
+                }
+            }
+            return NFirst{idx, bestT, bestPos}; }, {"NeulandHits"})
+            .Filter([](const NFirst &nf)
+                    { return nf.idx >= 0; }, {"n_first"})
+            .Define("beta_neu", [](const NFirst &nf)
+                    {
+            double L = nf.pos.Mag(), t = nf.tns;
+            return (L > 0 && t > 0) ? L / (C_CM_PER_NS * t) : -1.0; }, {"n_first"})
+            .Filter([](double b)
+                    { return b > 0 && b < 1; }, {"beta_neu"})
+            .Define("n_dir", [](const NFirst &nf)
+                    { return nf.pos.Mag() > 0 ? nf.pos.Unit() : TVector3(0, 0, 1); }, {"n_first"})
+            .Define("p_neu", [](double bn)
+                    {
+            double g = 1.0 / std::sqrt(1.0 - bn * bn);
+            return g * MN_GeV * bn; }, {"beta_neu"})
+            .Define("P4_neu", [](double p, const TVector3 &dir, double bn)
+                    {
+            double g = 1.0 / std::sqrt(1.0 - bn * bn);
+            return TLorentzVector(dir * p, g * MN_GeV); }, {"p_neu", "n_dir", "beta_neu"})
+            .Define("px_neu", [](const TLorentzVector &N)
+                    { return N.Px(); }, {"P4_neu"})
+            .Define("py_neu", [](const TLorentzVector &N)
+                    { return N.Py(); }, {"P4_neu"})
+            .Define("pz_neu", [](const TLorentzVector &N)
+                    { return N.Pz(); }, {"P4_neu"})
+            .Define("x_neu_hit", [](const NFirst &nf)
+                    { return nf.pos.X(); }, {"n_first"})
+            .Define("y_neu_hit", [](const NFirst &nf)
+                    { return nf.pos.Y(); }, {"n_first"})
+            .Define("z_neu_hit", [](const NFirst &nf)
+                    { return nf.pos.Z(); }, {"n_first"})
+            .Define("tof_neuland", [](const NFirst &nf)
+                    { return nf.tns; }, {"n_first"});
+}
+
+// ─── Output column lists ────────────────────────────────────────────────────
+
+static std::vector<std::string> detectorColumns()
+{
+        return {
+            "foot_z_1", "foot_z_2", "foot_z_3", "foot_z_4",
+            "foot_z_5", "foot_z_6", "foot_z_7", "foot_z_8",
+            "PosFoot5", "PosFoot6", "PosFoot7", "PosFoot8",
+            "fib30X", "fib30Y", "ElossFib30",
+            "fib31X", "fib31Y", "ElossFib31",
+            "fib32X", "fib32Y", "ElossFib32",
+            "fib33X", "fib33Y", "ElossFib33",
+            "tofdX",
+            "out_startX", "out_startY", "out_startZ"};
+}
+
+static std::vector<std::string> buildOutputColumns(bool hasNeutrons)
+{
+        std::vector<std::string> cols = {
+            "AoQ_frag", "Z_frag_est", "A_frag", "M_frag",
+            "beta_frag", "p_frag"};
+
+        if (hasNeutrons)
+                cols.insert(cols.end(), {"beta_neu", "p_neu"});
+
+        cols.insert(cols.end(), {"califa_opa",
+                                 "califa_theta_L", "califa_phi_L",
+                                 "califa_theta_R", "califa_phi_R",
+                                 "px_frag", "py_frag", "pz_frag",
+                                 "beta_proj"});
+
+        if (hasNeutrons)
+                cols.insert(cols.end(), {"px_neu", "py_neu", "pz_neu",
+                                         "x_neu_hit", "y_neu_hit", "z_neu_hit", "tof_neuland"});
+
+        cols.insert(cols.end(), {"px_in", "py_in", "pz_in"});
+
+        auto det = detectorColumns();
+        cols.insert(cols.end(), det.begin(), det.end());
+        return cols;
+}
+
+static std::vector<std::string> buildUnreactedColumns()
+{
+        std::vector<std::string> cols = {
+            "in_AoQ", "in_Z", "AoQ_frag", "Z_frag_est", "beta_proj"};
+        auto det = detectorColumns();
+        cols.insert(cols.end(), det.begin(), det.end());
+        return cols;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MAIN
+// ═══════════════════════════════════════════════════════════════════════════
+
+void eventFilter(std::string setting = "",
+                 TString reaction = "",
+                 bool test = false,
+                 bool append = false)
+{
+        ROOT::EnableImplicitMT(16);
+
+        // ── Load file list ──────────────────────────────────────────────────
+        const std::string listTxt =
+            std::string(getenv("repopath")) + "/final/settings/" + setting;
+
+        std::vector<std::string> files;
+        try
         {
-            return opa > -990.0;
-        },
-        {"califa_opa"},
-        "good CALIFA event");
+                files = read_file_list(listTxt);
+        }
+        catch (const std::exception &e)
+        {
+                std::cerr << "[ERROR] " << e.what() << "\n";
+                return;
+        }
+        std::cout << "[OK] Loaded " << files.size()
+                  << " ROOT files from " << listTxt << "\n";
 
-    auto df_out = df_califa_good
-                      .Define("px_frag", [](const TLorentzVector &F)
-                              { return F.Px(); }, {"P4_frag"})
-                      .Define("py_frag", [](const TLorentzVector &F)
-                              { return F.Py(); }, {"P4_frag"})
-                      .Define("pz_frag", [](const TLorentzVector &F)
-                              { return F.Pz(); }, {"P4_frag"});
+        // ── Reaction configuration ──────────────────────────────────────────
+        ReactionConfig cfg = makeReactionConfig(reaction);
 
-    if (hasNeutrons)
-    {
-        df_out = df_out
-                     .Define("px_neu", [](const TLorentzVector &N)
-                             { return N.Px(); }, {"P4_neu"})
-                     .Define("py_neu", [](const TLorentzVector &N)
-                             { return N.Py(); }, {"P4_neu"})
-                     .Define("pz_neu", [](const TLorentzVector &N)
-                             { return N.Pz(); }, {"P4_neu"})
-                     .Define("x_neu_hit", [](const NFirst &nf)
-                             { return nf.pos.X(); }, {"n_first"})
-                     .Define("y_neu_hit", [](const NFirst &nf)
-                             { return nf.pos.Y(); }, {"n_first"})
-                     .Define("z_neu_hit", [](const NFirst &nf)
-                             { return nf.pos.Z(); }, {"n_first"})
-                     .Define("tof_neuland", [](const NFirst &nf)
-                             { return nf.tns; }, {"n_first"});
-    }
+        if (cfg.outName.empty())
+        {
+                std::cerr << "[ERROR] Unknown/invalid reaction: " << reaction << "\n";
+                return;
+        }
 
-    // Save the data
-    std::vector<std::string> cols = {
-        "AoQ_frag",
-        "Z_frag_est",
-        "A_frag",
-        "M_frag",
-        "beta_frag",
-        "p_frag",
-        "califa_opa",
-        "califa_theta_L",
-        "califa_phi_L",
-        "califa_theta_R",
-        "califa_phi_R",
-        "px_frag",
-        "py_frag",
-        "pz_frag",
-        "beta_proj",
-        "px_in",
-        "py_in",
-        "pz_in"};
+        std::string outFileName = cfg.outName + (test ? "_test" : "") + ".root";
+        double M_FRAG_GeV = cfg.massAMU * AMU_GeV;
 
-    if (hasNeutrons)
-    {
-        cols = {
-            "AoQ_frag",
-            "Z_frag_est",
-            "A_frag",
-            "M_frag",
-            "beta_frag",
-            "beta_neu",
-            "p_frag",
-            "p_neu",
-            "califa_opa",
-            "califa_theta_L",
-            "califa_phi_L",
-            "califa_theta_R",
-            "califa_phi_R",
-            "px_frag",
-            "py_frag",
-            "pz_frag",
-            "beta_proj",
-            "px_neu",
-            "py_neu",
-            "pz_neu",
-            "x_neu_hit",
-            "y_neu_hit",
-            "z_neu_hit",
-            "tof_neuland",
-            "px_in",
-            "py_in",
-            "pz_in"};
-    }
+        // ── Open output file ────────────────────────────────────────────────
+        std::string outFile =
+            std::string(getenv("repopath")) + "/results/final/" + outFileName;
+        bool exists = (gSystem->AccessPathName(outFile.c_str()) == kFALSE);
+        TFile *fout = new TFile(outFile.c_str(),
+                                (append && exists) ? "UPDATE" : "RECREATE");
 
-    df_out.Snapshot("FilterDataTree", outFile, cols);
+        // ── Base filters ────────────────────────────────────────────────────
+        ROOT::RDataFrame df("evt", files);
 
-    std::cout << "\n[OK] TTree saved in: " << outFile << "\n";
+        ROOT::RDF::RNode base = df
+                                    .Filter([](TClonesArray &f)
+                                            { return f.GetEntriesFast() > 0; }, {"FrsData"})
+                                    .Filter([](TClonesArray &m)
+                                            { return m.GetEntriesFast() > 0; }, {"FragmentMDFTrack"})
+                                    .Filter([](TClonesArray &i)
+                                            { return i.GetEntriesFast() > 0; }, {"IncomingTrackFoot"});
 
-    if (fout)
-        fout->Close();
+        if (!cfg.isUnreacted)
+                base = base.Filter([](TClonesArray &c)
+                                   { return c.GetEntriesFast() >= 2; },
+                                   {"CalifaClusterData"});
+
+        ROOT::RDF::RNode df_cut = base;
+        if (cfg.hasNeutrons)
+                df_cut = df_cut.Filter([](TClonesArray &n)
+                                       { return n.GetEntriesFast() > 0; },
+                                       {"NeulandHits"});
+
+        // ── FRS incoming (graphical cut) + fragment PID ─────────────────────
+        auto df_frs = defineFrsIncoming(df_cut);
+        auto df_frag = defineFragmentPID(df_frs);
+
+        // ═════════════════  UNREACTED 25F PATH  ══════════════════════════════
+        if (cfg.isUnreacted)
+        {
+                double unr_mu_AoQ = cfg.ell_mu_AoQ;
+                double unr_sig_AoQ = cfg.ell_sig_AoQ;
+                double unr_mu_Z = cfg.ell_mu_Z;
+                double unr_sig_Z = cfg.ell_sig_Z;
+                double unr_k = cfg.ell_k;
+
+                auto df_sel = df_frag
+                                  .Filter([=](double aoq, double z)
+                                          { return insideEllipse(aoq, z,
+                                                                 unr_mu_AoQ, unr_sig_AoQ, unr_mu_Z, unr_sig_Z, unr_k); }, {"AoQ_frag", "Z_frag_est"}, "outgoing 25F (unreacted)");
+
+                auto df_det = defineFibersAndTofd(defineFootColumns(df_sel));
+                df_det = defineOutgoingStartPos(df_det);
+
+                df_det.Snapshot("FilterDataTree", outFile, buildUnreactedColumns());
+                std::cout << "\n[OK] TTree (unreacted 25F) saved in: " << outFile << "\n";
+                if (fout)
+                        fout->Close();
+                return;
+        }
+
+        // ═════════════════  STANDARD REACTION PATH  ══════════════════════════
+
+        // Full fragment kinematics
+        auto df_kin = df_frag
+                          .Define("A_frag", [](double aoq, double z)
+                                  { return aoq * z; },
+                                  {"AoQ_frag", "Z_frag_est"})
+                          .Define("P_frag_PoQ_vec", [](R3BTrackingParticle *t)
+                                  { return t->GetStartMomentum(); }, {"frag"})
+                          .Define("P_over_Q_frag", [](const TVector3 &p)
+                                  { return p.Mag(); },
+                                  {"P_frag_PoQ_vec"})
+                          .Define("P_frag_dir", [](const TVector3 &p)
+                                  { return p.Mag() > 0 ? p.Unit() : TVector3(0, 0, 1); }, {"P_frag_PoQ_vec"})
+                          .Define("P_in_vec", [](TClonesArray &it)
+                                  { return ((R3BTrackingParticle *)it.UncheckedAt(0))->GetStartMomentum(); }, {"IncomingTrackFoot"})
+                          .Define("px_in", [](const TVector3 &p)
+                                  { return p.X(); }, {"P_in_vec"})
+                          .Define("py_in", [](const TVector3 &p)
+                                  { return p.Y(); }, {"P_in_vec"})
+                          .Define("pz_in", [](const TVector3 &p)
+                                  { return p.Z(); }, {"P_in_vec"})
+                          .Define("Z_frag", []()
+                                  { return Z_FRAG; }, {})
+                          .Define("M_frag", [M_FRAG_GeV]()
+                                  { return M_FRAG_GeV; }, {})
+                          .Define("p_frag", [](double pq, double Z)
+                                  { return (pq > 0 && Z > 0) ? pq * Z : 0.0; }, {"P_over_Q_frag", "Z_frag"})
+                          .Define("beta_frag", [](double p, double M)
+                                  {
+            if (p <= 0 || M <= 0) return 0.0;
+            return p / std::sqrt(p * p + M * M); }, {"p_frag", "M_frag"})
+                          .Define("P4_frag", [](double p, double Mf, const TVector3 &dir)
+                                  {
+            if (p <= 0) return TLorentzVector(0, 0, 0, 0);
+            return TLorentzVector(dir * p, std::sqrt(p * p + Mf * Mf)); }, {"p_frag", "M_frag", "P_frag_dir"});
+
+        // ── Outgoing PID cut ────────────────────────────────────────────────
+        auto df_filtered = df_kin.Filter(
+            [&cfg](double aoq, double z)
+            {
+                    if (cfg.useEllipse)
+                            return insideEllipse(aoq, z,
+                                                 cfg.ell_mu_AoQ, cfg.ell_sig_AoQ,
+                                                 cfg.ell_mu_Z, cfg.ell_sig_Z, cfg.ell_k);
+                    return (aoq >= cfg.aoqOutMin && aoq <= cfg.aoqOutMax &&
+                            z >= SEL_Z_MIN && z <= SEL_Z_MAX);
+            },
+            {"AoQ_frag", "Z_frag_est"});
+
+        // ── Neutrons (conditional) ──────────────────────────────────────────
+        ROOT::RDF::RNode df_post_n = df_filtered;
+        if (cfg.hasNeutrons)
+                df_post_n = defineNeutronColumns(df_post_n);
+
+        // ── CALIFA + detectors + fragment momentum ──────────────────────────
+        auto df_cal = defineCalifaColumns(df_post_n);
+        auto df_det = defineFibersAndTofd(defineFootColumns(df_cal));
+
+        auto df_out = df_det
+                          .Define("px_frag", [](const TLorentzVector &F)
+                                  { return F.Px(); }, {"P4_frag"})
+                          .Define("py_frag", [](const TLorentzVector &F)
+                                  { return F.Py(); }, {"P4_frag"})
+                          .Define("pz_frag", [](const TLorentzVector &F)
+                                  { return F.Pz(); }, {"P4_frag"});
+
+        df_out = defineOutgoingStartPos(df_out);
+
+        // ── Snapshot ────────────────────────────────────────────────────────
+        df_out.Snapshot("FilterDataTree", outFile,
+                        buildOutputColumns(cfg.hasNeutrons));
+
+        std::cout << "\n[OK] TTree saved in: " << outFile << "\n";
+        if (fout)
+                fout->Close();
 }

@@ -1,0 +1,4 @@
+# CrossSections fit cache
+# label  amplitude  muAoQ  sigmaAoQ  muZ  sigmaZ  errAmplitude  errMuAoQ  errSigmaAoQ  errMuZ  errSigmaZ
+24O  12.6741  2.95793  0.0212353  8.06051  0.19033  0.32499  0.000365384  0.000387949  0.00314587  0.00318922
+25F  684.796  2.74033  0.00995602  8.97595  0.201  0.274863  2.73213e-06  2.10332e-06  5.56456e-05  4.56367e-05
