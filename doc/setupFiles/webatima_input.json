@@ -1,0 +1,115 @@
+{
+	"projectile": {
+		"mA": 25.00723050781,
+		"A": 25,
+		"Z": 9,
+		"Q": 9,
+		"T": 630
+	},
+	"matter": [
+		{
+			"A": 0,
+			"Z": 214,
+			"symbol": "mylar",
+			"rho": 1.38,
+			"th": 1.6559999999999997,
+			"l": 0.0012,
+			"mass": 0,
+			"gas": false,
+			"I": 0,
+			"name": "W1"
+		},
+		{
+			"A": 0,
+			"Z": 204,
+			"symbol": "LH2",
+			"rho": 0.0708,
+			"th": 354,
+			"l": 5,
+			"mass": 0,
+			"gas": false,
+			"I": 0,
+			"name": "LH2"
+		},
+		{
+			"A": 0,
+			"Z": 214,
+			"symbol": "mylar",
+			"rho": 1.38,
+			"th": 2.4839999999999995,
+			"l": 0.0018,
+			"mass": 0,
+			"gas": false,
+			"I": 0,
+			"name": "W2"
+		},
+		{
+			"A": 0,
+			"Z": 14,
+			"symbol": "Si",
+			"rho": 2.33,
+			"th": 3.495,
+			"l": 0.0015,
+			"mass": 28.0855,
+			"gas": false,
+			"I": 0,
+			"name": "F1"
+		},
+		{
+			"A": 0,
+			"Z": 14,
+			"symbol": "Si",
+			"rho": 2.33,
+			"th": 3.495,
+			"l": 0.0015,
+			"mass": 28.0855,
+			"gas": false,
+			"I": 0,
+			"name": "F2"
+		},
+		{
+			"A": 0,
+			"Z": 221,
+			"symbol": "Steel",
+			"rho": 8,
+			"th": 8,
+			"l": 0.001,
+			"mass": 0,
+			"gas": false,
+			"I": 0,
+			"name": "OutWin"
+		},
+		{
+			"A": 0,
+			"Z": 14,
+			"symbol": "Si",
+			"rho": 2.33,
+			"th": 3.495,
+			"l": 0.0015,
+			"mass": 28.0855,
+			"gas": false,
+			"I": 0,
+			"name": "F3"
+		},
+		{
+			"A": 0,
+			"Z": 14,
+			"symbol": "Si",
+			"rho": 2.33,
+			"th": 3.495,
+			"l": 0.0015,
+			"mass": 28.0855,
+			"gas": false,
+			"I": 0,
+			"name": "F4"
+		}
+	],
+	"config": {
+		"z_effective": 7,
+		"calculation": 1,
+		"corrections": 0,
+		"low_energy": 0,
+		"scattering": 255
+	},
+	"version": 1.65
+}
