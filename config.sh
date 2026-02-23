@@ -8,5 +8,5 @@ mkdir -p data
 
 # Create the results directory and its structure (if it does not exists yet)
 mkdir -p results
-mkdir -p results/{cal,sim,track,final}
+mkdir -p results/{cal,sim,final}
 mkdir -p sim/gen
