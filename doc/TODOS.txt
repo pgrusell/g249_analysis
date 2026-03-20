@@ -1,0 +1,16 @@
+In this document the TODOs of the analysis report are going to be listed:
+
+- Make a better cut to select the incoming.
+
+- Make a plot of the number of p2p events vs the energy of the cut.
+
+- Make a systematic study for the coplanarity condition in CALIFA.
+
+- Am I really able to reproduce the QFS peak from simulations ? -> Seems not to work with the p2pSpallation method, but maybe it's just my impression...
+
+
+Things to check concerning simulations:
+
+1. Where is the beam generated.
+2. Can we mimic the characteristics of the beamspot.
+3. What is the meaning of this offset between califa and the target ?? Does it have to be taken into account in the same sense in the simulation ?? How does it affect the randomization file ??
