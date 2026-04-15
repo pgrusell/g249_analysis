@@ -14,3 +14,5 @@ Things to check concerning simulations:
 1. Where is the beam generated.
 2. Can we mimic the characteristics of the beamspot.
 3. What is the meaning of this offset between califa and the target ?? Does it have to be taken into account in the same sense in the simulation ?? How does it affect the randomization file ??
+4. Seems that the OPA QFS peak can be shifted in simulations... so in principle we have to be careful.
+5. SEEMS TO BE A PROBLEM WITH THE SIMULATION SEPTUP FOR CALIFA. IN PRINCIPLE THE 4 CM OFFSET IMPLIES THAT CALIFA OVERLAPS WITH THE VACUUM CHAMBER...

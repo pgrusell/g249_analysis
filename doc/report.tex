@@ -70,7 +70,10 @@ This document is a brief description of the different task performed in the anal
 
 The first objective is to calculate the cross section for the population of the \textsuperscript{24}O\textsubscript{g.s}, which follows the equation:
 
-$$\sigma = -\frac{M_t}{\rho_tN_Az}\ln\left(1-\frac{N_{frag}^{p2p}}{N_{proj}\epsilon_{p2p}\epsilon_{ToT}\epsilon_{frag}^{rel}}\right)$$
+\begin{equation}
+    \sigma = -\frac{M_t}{\rho_tN_Az}\ln\left(1-\frac{N_{frag}^{p2p}}{N_{proj}\epsilon_{p2p}\epsilon_{ToT}\epsilon_{frag}^{rel}}\right)
+    \label{xs_equation}
+\end{equation}
 
 Where:
 
@@ -143,6 +146,7 @@ Now we have the reaction rate, the following step is to count the number of \F t
 The first thing that we notice here is that a better way to select the incoming is clearly needed as this seems not to be the best way possible. Nevertheless, the effect is probably not so big, since it should affect in the same way to the number of projectiles reconstructed from the unreacted and the \textsuperscript{24}O measured, but it's anyway a source of systematic uncertainties.
 
 \subsubsection{Unreacted selection: MDF}
+\label{subsub_unreacted_selection}
 
 After applying this cut, we will look for the \F that did not react after the target in the MDF. This MDF, have the following restrictions:
 
@@ -195,27 +199,32 @@ Now that we have defined the cut, is important to notice that just counting the 
     \label{gaussian_eff}
 \end{equation}
 
-The problem is that the previous fit has a non-negligible background that makes the value of the number of isotopes too unstable.
+According to this efficiency, the number of real \F can be estimated as the number of counts inside the cut, divided by the efficiency of the cut:
 
-To avoid this problem we will first select all valid AoQ values, by applying the elliptical in the A/Q vs Z plot. After that, we can histogram all these values, clearly seeing a Gaussian-like behavior. Making a fit to a Gaussian function plus a linear background (see \cref{figs:xs_incoming_estimate_from_fit} left) we can estimate the real number of fragments in the elliptical cut by correcting from contamination (the linear background), and then use \cref{gaussian_eff} to extrapolate and make it independent on the $k$. In \cref{figs:xs_incoming_estimate_from_fit} right, we see that the total variation of the number of isotopes for a window inside of $k\in[3, 4]$ is around $\pm 0.3\%$.
+\begin{equation}
+    N_{proj} = \frac{N_{proj}^{(ROI)}}{\varepsilon}
+\end{equation}
+
+Using the previous equation, we can represent the number of measured fragments as a function of the size of the cut. This is represented in \cref{figs:xs_incoming_estimate_from_fit} right. There, we can see that between $2\sigma$ and $3\sigma$ the number of fragments is constant within $\sim 0.4\%$. However, as the number of $\sigma$ is gets bigger and bigger, we start getting contamination from other isotopes.
 
 \begin{figure}[htbp]
     \centering
     \begin{subfigure}[b]{0.48\textwidth}
         \centering
-        \includegraphics[width=\textwidth]{figures/xs_gaussian_fit_aoq_slices.png}
+        \includegraphics[width=\textwidth]{figures/xs_2dgaussian_fit_incoming.png}
     \end{subfigure}
     \hfill
     \begin{subfigure}[b]{0.48\textwidth}
         \centering
-        \includegraphics[width=0.9\textwidth]{figures/xs_eff_vs_k.png}
+        \includegraphics[width=0.7\textwidth]{figures/xs_incoming_vs_k_cut.png}
     \end{subfigure}
 
-    \caption{Left: Result of histogramming all AoQs within a $k = 4$ elliptical cut, in blue. Result of the fit to a Gaussian plus linear background, in red. Right: Number of isotopes after efficiency correction as a function of $k$.}
+    \caption{Left: Result of the 2D Gaussian fit to the \F-``blop''. Right: Number of fragments as a function of the size of the elliptical cut $k$, after efficiency correction.}
     \label{figs:xs_incoming_estimate_from_fit}
 \end{figure}
 
 \subsection{$N_{frag}^{p2p}$}
+\label{xs_number_of_p2p}
 
 Once the number of projectiles has been calculated, the next step is to estimate the total amount of \textsuperscript{24}O measured. Since this nucleus does not have any bound states all \textsuperscript{24}O measured will correspond to the population of the ground state. However, to assert that all of them are produced through QFS p2p, we need to look at the opening angle in CALIFA.
 
@@ -265,15 +274,206 @@ Regarding stability of both cuts with respect to the parameter $k$ and $k_{\text
     \label{figs:xs_out_stabilities}
 \end{figure}
 
+\subsection{$\epsilon_{ToT}$}
+
+Now that we have the raw number for the number of projectiles and the number of \textsuperscript{24}O produced in the target, it's time to account the possible inefficiencies. It's interesting to note that, since we are calculating a ratio between two quantities, all the uncertainties that affect in the same way the number of projectiles and the number of reactions will cancel out, so we are only interested in the differences between the behaviors of these two isotopes.
+
+One very subtle source of uncertainty arises from the energy reconstruction in CALIFA. For individual crystals, energies higher than $\sim 30$ MeV saturate the $\gamma$-range and the time over threshold (ToT) is used to reconstruct the energy according to a exponencial relationship between both quantities:
+
+$$E = A \exp\left(-\frac{ToT}{B}\right)$$
+
+This reconstruction comes with the problem that if the ToT is not present for some events it cannot be used for the reconstruction and the event will be lost. To study this effect, we can use double-range crystals, from CEPA and iPhos, which, in addition to the $\gamma$-range, also have proton range which can be used as a trigger to see if a particles that actually have energy left ToT. So, for this efficieny study, the following scheme will be used:
+
+\begin{figure}[H]
+
+    \centering
+    \tikzset{every picture/.style={line width=0.75pt}} %set default line width to 0.75pt        
+
+    \begin{tikzpicture}[x=0.75pt,y=0.75pt,yscale=-1,xscale=1]
+        %uncomment if require: \path (0,442); %set diagram left start at 0, and has height of 442
+
+        %Shape: Rectangle [id:dp8042868856019479] 
+        \draw  [fill={rgb, 255:red, 155; green, 155; blue, 155 }  ,fill opacity=0.17 ] (18.5,67.83) -- (117,67.83) -- (117,123.58) -- (18.5,123.58) -- cycle ;
+        %Straight Lines [id:da9499580898815295] 
+        \draw [color={rgb, 255:red, 208; green, 2; blue, 27 }  ,draw opacity=0.51 ]   (117.5,95.08) -- (211.5,95.33) ;
+        \draw [shift={(213.5,95.33)}, rotate = 180.15] [color={rgb, 255:red, 208; green, 2; blue, 27 }  ,draw opacity=0.51 ][line width=0.75]    (10.93,-3.29) .. controls (6.95,-1.4) and (3.31,-0.3) .. (0,0) .. controls (3.31,0.3) and (6.95,1.4) .. (10.93,3.29)   ;
+        %Straight Lines [id:da3970652312806575] 
+        \draw [color={rgb, 255:red, 135; green, 230; blue, 25 }  ,draw opacity=1 ]   (117.5,95.08) -- (228.95,185.57) ;
+        \draw [shift={(230.5,186.83)}, rotate = 219.07] [color={rgb, 255:red, 135; green, 230; blue, 25 }  ,draw opacity=1 ][line width=0.75]    (10.93,-3.29) .. controls (6.95,-1.4) and (3.31,-0.3) .. (0,0) .. controls (3.31,0.3) and (6.95,1.4) .. (10.93,3.29)   ;
+        %Shape: Rectangle [id:dp504608082983335] 
+        \draw  [fill={rgb, 255:red, 155; green, 155; blue, 155 }  ,fill opacity=0.17 ] (237,159.33) -- (363.5,159.33) -- (363.5,215.08) -- (237,215.08) -- cycle ;
+        %Straight Lines [id:da7958733139754426] 
+        \draw [color={rgb, 255:red, 135; green, 230; blue, 25 }  ,draw opacity=1 ]   (364.5,186.08) -- (458.5,186.33) ;
+        \draw [shift={(460.5,186.33)}, rotate = 180.15] [color={rgb, 255:red, 135; green, 230; blue, 25 }  ,draw opacity=1 ][line width=0.75]    (10.93,-3.29) .. controls (6.95,-1.4) and (3.31,-0.3) .. (0,0) .. controls (3.31,0.3) and (6.95,1.4) .. (10.93,3.29)   ;
+        %Straight Lines [id:da3576499882584858] 
+        \draw [color={rgb, 255:red, 208; green, 2; blue, 27 }  ,draw opacity=0.51 ]   (364.5,186.08) -- (475.95,276.57) ;
+        \draw [shift={(477.5,277.83)}, rotate = 219.07] [color={rgb, 255:red, 208; green, 2; blue, 27 }  ,draw opacity=0.51 ][line width=0.75]    (10.93,-3.29) .. controls (6.95,-1.4) and (3.31,-0.3) .. (0,0) .. controls (3.31,0.3) and (6.95,1.4) .. (10.93,3.29)   ;
+        %Shape: Rectangle [id:dp9989519647748722] 
+        \draw  [fill={rgb, 255:red, 155; green, 155; blue, 155 }  ,fill opacity=0.17 ] (484.5,256.33) -- (611,256.33) -- (611,312.08) -- (484.5,312.08) -- cycle ;
+        %Straight Lines [id:da12071977478947049] 
+        \draw [color={rgb, 255:red, 135; green, 230; blue, 25 }  ,draw opacity=1 ]   (550,313.08) -- (576.32,362.98) ;
+        \draw [shift={(577.25,364.75)}, rotate = 242.19] [color={rgb, 255:red, 135; green, 230; blue, 25 }  ,draw opacity=1 ][line width=0.75]    (10.93,-3.29) .. controls (6.95,-1.4) and (3.31,-0.3) .. (0,0) .. controls (3.31,0.3) and (6.95,1.4) .. (10.93,3.29)   ;
+        %Straight Lines [id:da17598974291755143] 
+        \draw [color={rgb, 255:red, 208; green, 2; blue, 27 }  ,draw opacity=0.51 ]   (550,313.08) -- (522.22,363.5) ;
+        \draw [shift={(521.25,365.25)}, rotate = 298.86] [color={rgb, 255:red, 208; green, 2; blue, 27 }  ,draw opacity=0.51 ][line width=0.75]    (10.93,-3.29) .. controls (6.95,-1.4) and (3.31,-0.3) .. (0,0) .. controls (3.31,0.3) and (6.95,1.4) .. (10.93,3.29)   ;
+
+        % Text Node
+        \draw (16,77.58) node [anchor=north west][inner sep=0.75pt]   [align=left] {\begin{minipage}[lt]{69.07pt}\setlength\topsep{0pt}
+                \begin{center}
+                    \footnotesize
+                    Signal in \\ the proton range?
+                \end{center}
+
+            \end{minipage}};
+        % Text Node
+        \draw (152.5,74.08) node [anchor=north west][inner sep=0.75pt]  [color={rgb, 255:red, 208; green, 2; blue, 27 }  ,opacity=1 ] [align=left] {No};
+        % Text Node
+        \draw (173.5,123.08) node [anchor=north west][inner sep=0.75pt]  [color={rgb, 255:red, 65; green, 117; blue, 5 }  ,opacity=1 ] [align=left] {Yes};
+        % Text Node
+        \draw (241,169.08) node [anchor=north west][inner sep=0.75pt]   [align=left] {\begin{minipage}[lt]{82.67pt}\setlength\topsep{0pt}
+                \begin{center}
+                    \footnotesize
+                    Cal energy in \\the gamma range?
+                \end{center}
+
+            \end{minipage}};
+        % Text Node
+        \draw (397.5,165.08) node [anchor=north west][inner sep=0.75pt]  [color={rgb, 255:red, 65; green, 117; blue, 5 }  ,opacity=1 ] [align=left] {Yes};
+        % Text Node
+        \draw (400,236.08) node [anchor=north west][inner sep=0.75pt]  [color={rgb, 255:red, 208; green, 2; blue, 27 }  ,opacity=1 ] [align=left] {No};
+        % Text Node
+        \draw (488.5,266.08) node [anchor=north west][inner sep=0.75pt]   [align=left] {\begin{minipage}[lt]{84.18pt}\setlength\topsep{0pt}
+                \begin{center}
+                    \footnotesize
+                    ToT energy in \\the gamma range?
+                \end{center}
+
+            \end{minipage}};
+        % Text Node
+        \draw (507,326.08) node [anchor=north west][inner sep=0.75pt]  [color={rgb, 255:red, 208; green, 2; blue, 27 }  ,opacity=1 ] [align=left] {No};
+        % Text Node
+        \draw (571,325.58) node [anchor=north west][inner sep=0.75pt]  [color={rgb, 255:red, 65; green, 117; blue, 5 }  ,opacity=1 ] [align=left] {Yes};
+        % Text Node
+        \draw (223,85) node [anchor=north west][inner sep=0.75pt]  [color={rgb, 255:red, 144; green, 19; blue, 254 }  ,opacity=1 ] [align=left] {{\fontfamily{pcr}\selectfont \textbf{continue}}};
+        % Text Node
+        \draw (467,172) node [anchor=north west][inner sep=0.75pt]  [color={rgb, 255:red, 144; green, 19; blue, 254 }  ,opacity=1 ] [align=left] {{\fontfamily{pcr}\selectfont \textbf{continue}}};
+        % Text Node
+        \draw (428.75,205.4) node [anchor=north west][inner sep=0.75pt]  [font=\large]  {$n_{ToT}^{( total)} ++$};
+        % Text Node
+        \draw (474.25,369.9) node [anchor=north west][inner sep=0.75pt]  [font=\large]  {$n_{ToT}^{( rec)} ++$};
+        % Text Node
+        \draw (559,369) node [anchor=north west][inner sep=0.75pt]  [color={rgb, 255:red, 144; green, 19; blue, 254 }  ,opacity=1 ] [align=left] {{\fontfamily{pcr}\selectfont \textbf{continue}}};
+    \end{tikzpicture}
+\end{figure}
+
+And, with these number, we can simply use:
+
+$$\epsilon_{\text{ToT}} = 1 - \frac{n_{ToT}^{(rec)}}{n_{ToT}^{(total)}}$$
+
+In \cref{xs_etot_result}, we show the $\epsilon_{ToT}$ efficiency for each crystal of both iPhos and CEPA. Concerning the uncertainties, selecting $k$, independent and equally likely, successes out of $N$ trials is, by definition, a binomial distribution. The best estimator of the probably (i.e., the efficiency) is given by $\hat{p} = k/N$. To estimate its uncertainty, we use the confidence intervals defined in \S40.4.2.3 of \cite{Workman:2022ynf}. As we see in the corresponding picture, there is a dependence in the $\epsilon_{ToT}$ with the part of CALIFA: in iPhos it seems to be relatively constant but there is a more complex structure in CEPA.
+
+\begin{figure}[H]
+
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/xs_tot_eff.png}
+    \caption{Values of the $\epsilon_{ToT}$ for the different crystals of iPhos (beginning in red) and CEPA (beginning in blue).}
+    \label{xs_etot_result}
+\end{figure}
+
+A possible explanation to the behavior seen in \cref{xs_etot_result} is the polar angle. To study this behavior, for each event a \verb|TH2F| histogram of $\epsilon_{ToT}$ against the polar angle of the crystal has been filled. Afterwards, a \verb|TProfile| was used to extract the mean value and standard deviation of the $\epsilon_{ToT}$ for each value of the polar angle. This is shown in \cref{xs_etot_vs_polar_result}. To extract the dependence with the polar angle in order to extrapolate it towards barrel angles,we can simply make a fit to the following function:
+
+\begin{equation}
+    \epsilon_{ToT}(\theta) = p_0(1-p_1e^{-p_2\theta})
+    \label{eq:efftot_vs_polar}
+\end{equation}
+
+The reason to use this function comes just from empirical observation: More changes at lower angles and saturation at higher angles. The fit is also shown in the same figure.
+
+\begin{figure}[H]
+
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/xs_toteff_vs_polar.png}
+    \caption{Representation of the mean value of the $\epsilon_{ToT}$ with the polar angle. In red, fit to the function \cref{eq:efftot_vs_polar}.}
+    \label{xs_etot_vs_polar_result}
+\end{figure}
+
+With this we know, in principle, the $\epsilon_{ToT}$ for every crystal of CALIFA. However, to use it in \cref{xs_equation} we only need to correct for the correct proportion of barrel events, since for CEPA and for iPhos we have the proton range. Moreover, it's also important to notice that not all inefficient crystals will translate into a missing proton: If a protons leaves signal in four crystals but only one of them has a missing ToT, we will see the proton event either way. So to correctly study this effect up to cluster level we need to convolute this crystal-by-crystal ToT efficiency with a simulation which will be discussed in the following section.
+
 \subsection{$\epsilon_{p2p}$}
 
-Now that we have the raw number for the number of projectiles and the number of \textsuperscript{24}O produced in the target, it's time to account the possible unefficiencies. It's interesting to note that, since we are calculating a ratio between two quantities, all the uncertainties that affect in the same way the number of projectiles and the number of reactions will cancel out, so we are only interested in the differences between the behaviors of these two isotopes.
+A very crucial part of the p2p selection is, as explained in \cref{xs_number_of_p2p}, is to detect a QFS signal. These QFS signals are characterized by two coplanar clusters in CALIFA depositing an energy higher than $\sim 20$ MeV. Thus, a clear source of inefficiency, can come from real p2p-QFS events that could not fullfil the conditions of this selection, either for the geometrical acceptance of CALIFA itself or for other effects of the detector.
 
-The first and more clear difference is that we are using the fact that all p2p reactions will leave a clear signal in CALIFA in form of two high-energy cluster. Nonetheless, this is not true, some protons can escape CALIFA, or have much bigger, or smaller, angle than expected...
+In order to study this effect we will use the INCL generator to produce \textsuperscript{25}F(p,2p)\textsuperscript{24}O events as source for a realistic GEANT4-based simulation using R3BRoot.
 
-This unefficiency has to be taken into account by simulating the response of CALIFA to p2p events generated with INCL.
+Concerning CALIFA geometry, we have used the 2025 version with a global offset between CALIFA and the target of -4 cm (CALIFA closer to the target). This was fine-tunned so the QFS peaks matched the theoretical $\sim 82^{\circ}$ value. Notice that this value can introduce changes in this p2p efficiency, and its effect will be studied later.
 
-Concerning CALIFA geometry, we have used the 2025 version with a global offset between CALIFA and the target of -5 cm. This was fine-tunned so the QFS peaks matched the theoretical $\sim 82^{\circ}$ value. Notice that this value can introduce changes in this p2p efficiency, and its effect will be studied later.
+Moreover, the four FOOTs after the target have also been simulated in order provide better energy reconstruction. The complete setup of the simulation is shown in \cref{califa_p2p_sim_setup}.
+
+\begin{figure}[H]
+
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/califa_p2p_sim_setup.png}
+    \caption{Simulation setup with a clipping to see the internal structure of the detectors: CALIFA (red), vacuum chamber (light grey), LH\textsubscript{2} target (dark gray), FOOTs (orange). Additionally, a \textsuperscript{24}O (blue) + 2p (in green) event have been simulated.}
+    \label{califa_p2p_sim_setup}
+\end{figure}
+
+With respect to the CALIFA digitizer, a very basic setup has been used. For the non-uniformity of the crystals, we have assumed a $1\%$, for the experimental gamma energy resolution, a $6\%$ at 1 MeV has been used and for the detection threshold has been set to $10$ keV. Even though, all the real crystal-by-crystal values are known either from data of this experiment or from past measurements, since we are only interested in seeing if there is a cluster corresponding to a proton or not, the real effect that these minor (and really time-consuming) thing is basically negligible. In order to test our statement, the simulations will be repeated slightly varying these parameters.
+
+On the other hand, a effect that we will do take into account in the digitizer will be the $\epsilon_{ToT}$. As explained in last section, now we know the $\epsilon_{ToT}$ for each crystal: for Barrel crystals we can get it depending on the polar angle of the crystal as $\epsilon_{ToT}$ is known and for iPhos/CEPA this efficiency is 1 since the proton range will be used anyway. So we will use a Metropolis-based algorithm, to study the real efect of  $\epsilon_{ToT}$-inefficiencies in p2p detection:
+
+For each crystal and in each event, we will generate a random number from 0 to 1, if this number happens to be higher than the $\epsilon_{ToT}$ efficiency for the corresponding crystal, the crystal will be discared. After that, the cluster algorithm will be applied only over the valid crytals automatically propagating the effect of the $\epsilon_{ToT}$-inefficiencies in p2p.
+
+Once clusterization is done, with exactly the same algorithm as in experimental data, we will proceed counting, with the same method as described in \cref{xs_number_of_p2p}. Now, by comparing the number obtained in the simulation with the total number of \textsuperscript{24}O generated, we will have access to the product $\epsilon_{p2p}\epsilon_{ToT}$.
+
+
+
+\subsection{$\epsilon_{frag}$}
+
+Finally, the last step is to estimate the geometrical acceptances of the detectors. Since we are calculating the ratio between $N_{frag}^{p2p}/N_{proj}$, when correcting by geometrical efficiency we will have:
+
+$$\frac{N_{frag}^{p2p}}{N_{proj}}\bigg|_{\text{corr}} = \frac{N_{frag}^{p2p}}{N_{proj}} \cdot \frac{\epsilon_{frag}^{unreact}}{\epsilon_{frag}^{p2p}}$$
+
+According to this equation, we are, actually, only interested in the quotient of both efficiency, the, so called, relative efficiency, $\epsilon_{frag}$. In order to calculate it, we will study the behavior of both \textsuperscript{24}O and \F, within the different detectors and, as long as the look the same, we will consider it to be $1$.
+
+First of all, we will look at the reconstructed positions in the FOOT detectors after the target. As explained in \cref{subsub_unreacted_selection}, not all hits in the FOOTs are used for tracking, only the highest energy hit is used.
+
+\begin{figure}[H]
+
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/xs_foot_posVsEnergy.png}
+    \caption{Position of the FOOTs againts their charge for every event used for tracking by the MDF. Top: Selection of the \textsuperscript{24}O as outgoing fragment (+ p2p-QFS selection). Bottom: Selection of the unreacted \F.}
+    \label{xs_foot_posVsEnergy}
+\end{figure}
+
+In \cref{xs_foot_posVsEnergy}
+
+\subsection{Uncertainties}
+
+Now that we have calculated the values and dependencies of all the quantities necessary to calculate the cross section, the last step is to determinate both its systematic and statistical uncertainties.
+
+\subsubsection{Statistical Uncertainties}
+
+The statistical uncertainties are all the fluctuations in the observables that could be reduced by simply increasing the amount of data.
+
+In our case, since we are not measuring the values $M_t$, $\rho_t$, $N_A$ and $z$, they don't have statistical uncertainties.
+
+Since the $\epsilon_{ToT}\epsilon_{p2p}$ is obtained from a Montecarlo, just by increasing the number of iterations to infinity, its statistical uncertainty will be reduced to zero.
+
+On the other hand, the uncertainty in the measurements of the number of $N_{proj}$ and $N_{frag}^{p2p}$, comes from counting the number of entries inside a window. This is, in first approximation a Poisson-like experiment and, thus, the statistical uncertainty is characterized by $\sqrt{N}$.
+
+Now, assuming that both observables are statistical independent, we can calculate the value of the statistical uncertainty of the cross section by using the standard propagation of errors formula:
+
+$$    \sigma = -\frac{M_t}{\rho_tN_Az}\ln\left(1-\frac{N_{frag}^{p2p}}{N_{proj}\epsilon_{p2p}\epsilon_{ToT}\epsilon_{frag}^{rel}}\right)$$
+
+$$\frac{\partial \sigma}{\partial N_{frag}^{p2p}} = \frac{M_t}{\rho_tN_Az} \cdot \frac{1}{1-\frac{N_{frag}^{p2p}}{N_{proj}\epsilon_{p2p}\epsilon_{ToT}\epsilon_{frag}^{rel}}} \cdot \frac{1}{N_{proj}\epsilon_{p2p}\epsilon_{ToT}\epsilon_{frag}^{rel}}$$
+
+$$\frac{\partial \sigma}{\partial N_{proj}} = \frac{M_t}{\rho_tN_Az} \cdot \frac{1}{1-\frac{N_{frag}^{p2p}}{N_{proj}\epsilon_{p2p}\epsilon_{ToT}\epsilon_{frag}^{rel}}} \cdot \frac{1}{N_{proj}\epsilon_{p2p}\epsilon_{ToT}\epsilon_{frag}^{rel}}$$
+
+
+
+
+
+
 
 \bibliographystyle{plain}
 \bibliography{bibliography}
