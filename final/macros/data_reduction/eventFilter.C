@@ -180,7 +180,7 @@ static ReactionConfig makeReactionConfig(const TString &reaction)
                 cfg = {2.785, 2.88,
                        23.015696686 - 8 * 0.00511,
                        "data_23O", true, false,
-                       true, 2.83211, 0.0256619, 8.07677, 0.22536, 2.5};
+                       true, 2.83211, 0.0256619, 8.07677, 0.22536, 3};
         }
         else if (reaction == "25F22O")
         {
@@ -614,7 +614,7 @@ void eventFilter(std::string setting = "",
                  bool test = false,
                  bool append = false)
 {
-        ROOT::EnableImplicitMT(16);
+        ROOT::EnableImplicitMT(1);
 
         // ── Load file list ──────────────────────────────────────────────────
         const std::string listTxt =
@@ -646,8 +646,9 @@ void eventFilter(std::string setting = "",
         double M_FRAG_GeV = cfg.massAMU * AMU_GeV;
 
         // ── Open output file ────────────────────────────────────────────────
-        std::string outFile =
-            std::string(getenv("repopath")) + "/results/final/" + outFileName;
+        // std::string outFile =
+        // std::string(getenv("repopath")) + "/results/final/" + outFileName;
+        std::string outFile = "/opt/expSoftware/data/pgrusell/" + outFileName;
         bool exists = (gSystem->AccessPathName(outFile.c_str()) == kFALSE);
         TFile *fout = new TFile(outFile.c_str(),
                                 (append && exists) ? "UPDATE" : "RECREATE");
