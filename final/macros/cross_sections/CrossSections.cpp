@@ -231,6 +231,15 @@ double CrossSections::RunFit2DForNucleus(TString nuc, double k)
         zmax = 8.5;
         nBins = 250;
     }
+    else if (nuc == "23O")
+    {
+        files = {"/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/data_25Fp2p_test.root"};
+        aoqmin = 2.78;
+        aoqmax = 2.88;
+        zmin = 7.6;
+        zmax = 8.5;
+        nBins = 250;
+    }
     else
     {
         std::cerr << "[ERROR] Unknown nucleus: " << nuc << "\n";
@@ -384,7 +393,7 @@ OpaCutResults CrossSections::CalculateOpaLimits(const TreeData &data, double eff
         return res;
     }
 
-    OpaCutResults res = FitOpaHistogram(h, kRoi);
+    OpaCutResults res = FitOpaHistogram(h, kRoi, false);
     return res;
 }
 
@@ -487,7 +496,7 @@ void CrossSections::PlotNbOfYieldsVsK()
     }
 
     const int nPoints = 50;
-    const double kMin = 2.0, kMax = 4.0;
+    const double kMin = 0.5, kMax = 4.0;
     const double kStep = (kMax - kMin) / (nPoints - 1);
 
     const std::vector<double> kOpaValues = {2.0, 2.5, 3.0, 3.5, 4.0};
@@ -572,7 +581,7 @@ void CrossSections::PlotOutgoingVsKopa()
     }
 
     const int nPoints = 30;
-    const double kopaMin = 1.5, kopaMax = 4.5;
+    const double kopaMin = 0.5, kopaMax = 4.5;
     const double kopaStep = (kopaMax - kopaMin) / (nPoints - 1);
 
     const double kFixed = 2.5;

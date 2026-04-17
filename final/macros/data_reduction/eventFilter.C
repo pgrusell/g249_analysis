@@ -179,7 +179,8 @@ static ReactionConfig makeReactionConfig(const TString &reaction)
         {
                 cfg = {2.785, 2.88,
                        23.015696686 - 8 * 0.00511,
-                       "data_23O", true, false};
+                       "data_23O", true, false,
+                       true, 2.83211, 0.0256619, 8.07677, 0.22536, 2.5};
         }
         else if (reaction == "25F22O")
         {
