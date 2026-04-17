@@ -74,7 +74,7 @@ void plot_23O_24O()
     }
 
     // (p,2p) in CALIFA
-    TString cond = "califa_opa > 1.2 && califa_opa < 1.4";
+    TString cond = "califa_opa > 1.2 && califa_opa < 1.8";
 
     TH1D *hErel23 = new TH1D("hErel23",
                              "E_{rel} (^{23}O+n);E_{rel} [MeV];A.U.",
