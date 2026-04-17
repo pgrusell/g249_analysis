@@ -76,7 +76,7 @@ void califap2psim(Int_t kIter = 1)
     run->AddModule(foots);
 
     // --------------- CALIFA ------------------------------------
-    auto *calsim = new R3BCalifa("califa_v2025.6.geo.root", {0., 0., -4. + 0.5});
+    auto *calsim = new R3BCalifa("califa_v2025.6.geo.root", {0., 0., -4.});
     calsim->SelectGeometryVersion(2025);
     run->AddModule(calsim);
 
