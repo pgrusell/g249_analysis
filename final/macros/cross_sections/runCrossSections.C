@@ -29,7 +29,7 @@ void runCrossSections(TString mode = "scratch",
         std::cout << "\n====== MODE: scratch ======\n\n";
 
         xs.RunFit2DForNucleus("25F", kPID);
-        xs.RunFit2DForNucleus("24O", kPID);
+        xs.RunFit2DForNucleus("23O", kPID);
         xs.SaveFitCache(cacheFile);
 
         double sigma = xs.ComputeCrossSection();
