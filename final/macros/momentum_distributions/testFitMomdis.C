@@ -96,6 +96,39 @@ TH1F *generateFakeData(TH1F *tmpl1, TH1F *tmpl2, double a, double b, double N,
     return hFake;
 }
 
+// Event-by-event toy MC:
+// Sample events from the TRUE mixture (a * hTheo1 + b * hTheo2) built from the
+// ORIGINAL fine-binned theoretical distributions, and fill a histogram in the
+// fit binning. The total number of events fluctuates Poisson around N.
+TH1F *generateToyEventByEvent(TH1F *hTheo1, TH1F *hTheo2,
+                              double a, double N,
+                              int nBinsFit, double xmin, double xmax,
+                              std::string name, TRandom3 *rng)
+{
+    TH1F *hToy = new TH1F(name.c_str(), name.c_str(), nBinsFit, xmin, xmax);
+
+    // Total number of events fluctuates Poisson around N
+    const int nEvents = rng->Poisson(N);
+
+    for (int ev = 0; ev < nEvents; ev++)
+    {
+        // Choose component with probability a (s1/2) or 1-a (d5/2)
+        TH1F *src = (rng->Uniform() < a) ? hTheo1 : hTheo2;
+        // Sample x from the original (fine-binned) theoretical distribution
+        const double x = src->GetRandom();
+        hToy->Fill(x);
+    }
+
+    // Assign Poisson errors
+    for (int i = 1; i <= nBinsFit; i++)
+    {
+        const double k = hToy->GetBinContent(i);
+        hToy->SetBinError(i, (k > 0) ? std::sqrt(k) : 1.0);
+    }
+
+    return hToy;
+}
+
 void chi2Function(Int_t &npar, Double_t *gin, Double_t &f, Double_t *par, Int_t iflag)
 {
     const double N = par[0];
@@ -222,7 +255,7 @@ void testFitMomdis()
     std::cout << "================================\n\n";
 
     // =====================================================================
-    // Bootstrap: Poisson variations over the fake data
+    // METHOD 1 — Bootstrap: Poisson variations over the binned fake data
     // =====================================================================
     TH1F *hFakeToy = (TH1F *)hFake->Clone("hFakeToy");
     FitGlobals::gExp = hFakeToy;
@@ -240,7 +273,7 @@ void testFitMomdis()
     int nFailed = 0;
     const int nBins = hFake->GetNbinsX();
 
-    std::cout << "Running " << nToys << " bootstrap toys...\n";
+    std::cout << "Running " << nToys << " BOOTSTRAP toys (Poisson per bin)...\n";
 
     for (int t = 0; t < nToys; t++)
     {
@@ -269,13 +302,71 @@ void testFitMomdis()
         hF2->Fill(f2);
 
         if ((t + 1) % 100 == 0)
-            std::cout << "  toy " << t + 1 << "/" << nToys << "\n";
+            std::cout << "  bootstrap toy " << t + 1 << "/" << nToys << "\n";
     }
 
-    std::cout << "Failed toys: " << nFailed << "/" << nToys << "\n\n";
+    std::cout << "Failed bootstrap toys: " << nFailed << "/" << nToys << "\n\n";
 
     // =====================================================================
-    // Statistics
+    // METHOD 2 — Event-by-event toy MC:
+    //   Sample events from the TRUE mixture (a * s1/2 + b * d5/2), built from
+    //   the ORIGINAL theoretical distributions (before rebinning), rebin into
+    //   the fit histogram, and fit. Measures the pure statistical variance
+    //   of the sampling process, independent of the bootstrap rebinning.
+    // =====================================================================
+    TH1F *hN_mc = new TH1F("hN_mc", "ToyMC N;N;toys", 80,
+                           nominal.N * 0.9, nominal.N * 1.1);
+    TH1F *hF1_mc = new TH1F("hF1_mc", "ToyMC f(2s_{1/2});f_{1};toys", 80, 0.0, 1.0);
+    TH1F *hF2_mc = new TH1F("hF2_mc", "ToyMC f(1d_{5/2});f_{2};toys", 80, 0.0, 1.0);
+
+    std::vector<double> v_N_mc, v_f1_mc, v_f2_mc;
+    v_N_mc.reserve(nToys);
+    v_f1_mc.reserve(nToys);
+    v_f2_mc.reserve(nToys);
+
+    int nFailed_mc = 0;
+
+    std::cout << "Running " << nToys << " TOY-MC toys (event-by-event from true mixture)...\n";
+
+    for (int t = 0; t < nToys; t++)
+    {
+        TH1F *hToy = generateToyEventByEvent(momdis_2s12_gs.Qt, momdis_1d52_gs.Qt,
+                                             a_true, N_true,
+                                             fitNBins, -fitMax, fitMax,
+                                             Form("hToyMC_%d", t), &rng);
+        FitGlobals::gExp = hToy;
+
+        const double Ninit = (hToy->Integral() > 0) ? hToy->Integral() : N_true;
+        FitResult r = doFit(Ninit, nominal.f1, false);
+
+        if (!r.converged)
+        {
+            nFailed_mc++;
+            delete hToy;
+            continue;
+        }
+
+        const double f2 = 1.0 - r.f1;
+        v_N_mc.push_back(r.N);
+        v_f1_mc.push_back(r.f1);
+        v_f2_mc.push_back(f2);
+
+        hN_mc->Fill(r.N);
+        hF1_mc->Fill(r.f1);
+        hF2_mc->Fill(f2);
+
+        delete hToy;
+
+        if ((t + 1) % 100 == 0)
+            std::cout << "  toy-MC " << t + 1 << "/" << nToys << "\n";
+    }
+    std::cout << "Failed toy-MC toys: " << nFailed_mc << "/" << nToys << "\n\n";
+
+    // Restore nominal pointer
+    FitGlobals::gExp = hFake;
+
+    // =====================================================================
+    // Statistics (both methods)
     // =====================================================================
     auto stats = [](std::vector<double> v)
     {
@@ -299,9 +390,14 @@ void testFitMomdis()
     auto [meanF1, sigF1, p16F1, p50F1, p84F1] = stats(v_f1);
     auto [meanF2, sigF2, p16F2, p50F2, p84F2] = stats(v_f2);
 
-    std::cout << "=== Bootstrap results (" << v_N.size() << " toys) ===\n";
+    auto [meanN_mc, sigN_mc, p16N_mc, p50N_mc, p84N_mc] = stats(v_N_mc);
+    auto [meanF1_mc, sigF1_mc, p16F1_mc, p50F1_mc, p84F1_mc] = stats(v_f1_mc);
+    auto [meanF2_mc, sigF2_mc, p16F2_mc, p50F2_mc, p84F2_mc] = stats(v_f2_mc);
+
     std::cout << std::fixed;
     std::cout.precision(4);
+
+    std::cout << "=== BOOTSTRAP results (" << v_N.size() << " toys) ===\n";
     std::cout << "N      : mean = " << meanN << "  sigma = " << sigN
               << "   median = " << p50N << "  [68% CI: " << p16N << ", " << p84N << "]   truth = " << N_true << "\n";
     std::cout << "f(s12) : mean = " << meanF1 << "  sigma = " << sigF1
@@ -310,18 +406,36 @@ void testFitMomdis()
               << "   median = " << p50F2 << "  [68% CI: " << p16F2 << ", " << p84F2 << "]   truth = " << b_true << "\n";
     std::cout << "=========================================\n\n";
 
-    // Pulls: (nominal - truth) / sigma_bootstrap
+    std::cout << "=== TOY-MC results (" << v_N_mc.size() << " toys) ===\n";
+    std::cout << "N      : mean = " << meanN_mc << "  sigma = " << sigN_mc
+              << "   median = " << p50N_mc << "  [68% CI: " << p16N_mc << ", " << p84N_mc << "]   truth = " << N_true << "\n";
+    std::cout << "f(s12) : mean = " << meanF1_mc << "  sigma = " << sigF1_mc
+              << "   median = " << p50F1_mc << "  [68% CI: " << p16F1_mc << ", " << p84F1_mc << "]   truth = " << a_true << "\n";
+    std::cout << "f(d52) : mean = " << meanF2_mc << "  sigma = " << sigF2_mc
+              << "   median = " << p50F2_mc << "  [68% CI: " << p16F2_mc << ", " << p84F2_mc << "]   truth = " << b_true << "\n";
+    std::cout << "=========================================\n\n";
+
+    std::cout << "=== SIGMA COMPARISON (bootstrap vs toy-MC) ===\n";
+    std::cout << "            bootstrap        toy-MC        ratio(MC/BS)\n";
+    std::cout << "N       :   " << sigN << "        " << sigN_mc << "        " << sigN_mc / sigN << "\n";
+    std::cout << "f(s12)  :   " << sigF1 << "        " << sigF1_mc << "        " << sigF1_mc / sigF1 << "\n";
+    std::cout << "f(d52)  :   " << sigF2 << "        " << sigF2_mc << "        " << sigF2_mc / sigF2 << "\n";
+    std::cout << "===============================================\n\n";
+
+    // Pulls: (nominal - truth) / sigma
     std::cout << "=== Pulls (nominal - truth) / sigma ===\n";
-    std::cout << "N      : " << (nominal.N - N_true) / sigN << " sigma\n";
-    std::cout << "f(s12) : " << (nominal.f1 - a_true) / sigF1 << " sigma\n";
-    std::cout << "f(d52) : " << ((1.0 - nominal.f1) - b_true) / sigF2 << " sigma\n";
+    std::cout << "            bootstrap         toy-MC\n";
+    std::cout << "N       :   " << (nominal.N - N_true) / sigN
+              << "          " << (nominal.N - N_true) / sigN_mc << "\n";
+    std::cout << "f(s12)  :   " << (nominal.f1 - a_true) / sigF1
+              << "          " << (nominal.f1 - a_true) / sigF1_mc << "\n";
+    std::cout << "f(d52)  :   " << ((1.0 - nominal.f1) - b_true) / sigF2
+              << "          " << ((1.0 - nominal.f1) - b_true) / sigF2_mc << "\n";
     std::cout << "=======================================\n\n";
 
     std::cout << "Final result:\n";
-    std::cout << "  f(2s1/2) = " << nominal.f1 << " +/- " << sigF1
-              << "   (truth: " << a_true << ")\n";
-    std::cout << "  f(1d5/2) = " << 1.0 - nominal.f1 << " +/- " << sigF2
-              << "   (truth: " << b_true << ")\n\n";
+    std::cout << "  f(2s1/2) = " << nominal.f1 << " +/- " << sigF1 << " (BS) / " << sigF1_mc << " (MC)   truth: " << a_true << "\n";
+    std::cout << "  f(1d5/2) = " << 1.0 - nominal.f1 << " +/- " << sigF2 << " (BS) / " << sigF2_mc << " (MC)   truth: " << b_true << "\n\n";
 
     // =====================================================================
     // Plots
@@ -362,6 +476,7 @@ void testFitMomdis()
     leg->AddEntry(comp_d52, Form("1d_{5/2} (%.1f #pm %.1f)%%", (1.0 - nominal.f1) * 100, sigF2 * 100), "l");
     leg->Draw();
 
+    // ---------- Canvas 2: bootstrap distributions ----------
     TCanvas *c2 = new TCanvas("c2", "Bootstrap distributions", 1200, 400);
     c2->Divide(3, 1);
 
@@ -394,4 +509,87 @@ void testFitMomdis()
     lF2->SetLineStyle(2);
     lF2->SetLineWidth(2);
     lF2->Draw();
+
+    // ---------- Canvas 3: toy-MC distributions ----------
+    TCanvas *c3 = new TCanvas("c3", "Toy-MC distributions", 1200, 400);
+    c3->Divide(3, 1);
+
+    c3->cd(1);
+    hN_mc->SetLineColor(kBlack);
+    hN_mc->SetFillColorAlpha(kGray, 0.5);
+    hN_mc->Draw();
+    TLine *lN_mc = new TLine(N_true, 0, N_true, hN_mc->GetMaximum());
+    lN_mc->SetLineColor(kRed);
+    lN_mc->SetLineStyle(2);
+    lN_mc->SetLineWidth(2);
+    lN_mc->Draw();
+
+    c3->cd(2);
+    hF1_mc->SetLineColor(kBlue);
+    hF1_mc->SetFillColorAlpha(kBlue, 0.3);
+    hF1_mc->Draw();
+    TLine *lF1_mc = new TLine(a_true, 0, a_true, hF1_mc->GetMaximum());
+    lF1_mc->SetLineColor(kRed);
+    lF1_mc->SetLineStyle(2);
+    lF1_mc->SetLineWidth(2);
+    lF1_mc->Draw();
+
+    c3->cd(3);
+    hF2_mc->SetLineColor(kGreen + 2);
+    hF2_mc->SetFillColorAlpha(kGreen + 2, 0.3);
+    hF2_mc->Draw();
+    TLine *lF2_mc = new TLine(b_true, 0, b_true, hF2_mc->GetMaximum());
+    lF2_mc->SetLineColor(kRed);
+    lF2_mc->SetLineStyle(2);
+    lF2_mc->SetLineWidth(2);
+    lF2_mc->Draw();
+
+    // ---------- Canvas 4: overlay bootstrap vs toy-MC ----------
+    TCanvas *c4 = new TCanvas("c4", "Bootstrap vs Toy-MC overlay", 1200, 400);
+    c4->Divide(3, 1);
+
+    auto drawOverlay = [&](TH1F *hBS, TH1F *hMC, double truth, const char *xtitle)
+    {
+        // Normalise to unit area so shapes are directly comparable
+        TH1F *hBSn = (TH1F *)hBS->Clone(Form("%s_norm", hBS->GetName()));
+        TH1F *hMCn = (TH1F *)hMC->Clone(Form("%s_norm", hMC->GetName()));
+        if (hBSn->Integral() > 0)
+            hBSn->Scale(1.0 / hBSn->Integral());
+        if (hMCn->Integral() > 0)
+            hMCn->Scale(1.0 / hMCn->Integral());
+
+        hBSn->SetLineColor(kBlack);
+        hBSn->SetFillColorAlpha(kGray, 0.4);
+        hMCn->SetLineColor(kAzure + 1);
+        hMCn->SetFillColorAlpha(kAzure + 1, 0.3);
+        hBSn->SetLineWidth(2);
+        hMCn->SetLineWidth(2);
+
+        const double ymax = 1.2 * std::max(hBSn->GetMaximum(), hMCn->GetMaximum());
+        hBSn->SetMaximum(ymax);
+        hBSn->GetXaxis()->SetTitle(xtitle);
+        hBSn->GetYaxis()->SetTitle("normalised toys");
+        hBSn->SetTitle("");
+        hBSn->Draw("hist");
+        hMCn->Draw("hist same");
+
+        TLine *lt = new TLine(truth, 0, truth, ymax);
+        lt->SetLineColor(kRed);
+        lt->SetLineStyle(2);
+        lt->SetLineWidth(2);
+        lt->Draw();
+
+        auto *lg = new TLegend(0.60, 0.70, 0.89, 0.89);
+        lg->AddEntry(hBSn, "Bootstrap", "f");
+        lg->AddEntry(hMCn, "Toy-MC", "f");
+        lg->AddEntry(lt, "truth", "l");
+        lg->Draw();
+    };
+
+    c4->cd(1);
+    drawOverlay(hN, hN_mc, N_true, "N");
+    c4->cd(2);
+    drawOverlay(hF1, hF1_mc, a_true, "f(2s_{1/2})");
+    c4->cd(3);
+    drawOverlay(hF2, hF2_mc, b_true, "f(1d_{5/2})");
 }
