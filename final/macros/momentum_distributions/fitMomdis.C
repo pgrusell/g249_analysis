@@ -1,4 +1,13 @@
-#include <TMinuit.h>
+#include <RooRealVar.h>
+#include <RooDataHist.h>
+#include <RooHistPdf.h>
+#include <RooAddPdf.h>
+#include <RooArgList.h>
+#include <RooArgSet.h>
+#include <RooPlot.h>
+#include <RooFitResult.h>
+#include <RooMsgService.h>
+#include <RooChi2Var.h>
 #include <TRandom3.h>
 
 struct MomentaDist
@@ -8,14 +17,6 @@ struct MomentaDist
     TH1F *Qy = nullptr;
     TH1F *Q = nullptr;
 };
-
-// ---- Globals para la función de chi² (TMinuit no admite captures) ----
-namespace FitGlobals
-{
-    TH1F *gExp = nullptr;
-    TH1F *gT1 = nullptr; // plantilla s1/2 normalizada a integral 1
-    TH1F *gT2 = nullptr; // plantilla d5/2 normalizada a integral 1
-}
 
 MomentaDist getMomentaDistFromtxt(std::string txtFile, std::string histName)
 {
@@ -55,7 +56,7 @@ TH1F *getMomentaDistFromRoot(std::string rootFile, int nBins = 50, double maxBin
     auto *tr = static_cast<TTree *>(f->Get("KinTree"));
 
     double py;
-    tr->SetBranchAddress("py_rf_rot", &py);
+    tr->SetBranchAddress("px_rf_rot", &py);
 
     double sum = 0.0;
     Long64_t n = 0;
@@ -114,257 +115,294 @@ TH1F *buildTemplate(TH1F *hTheo, TH1F *hExp, std::string name)
     return hOut;
 }
 
-void chi2Function(Int_t &npar, Double_t *gin, Double_t &f, Double_t *par, Int_t iflag)
+// Small helper to compute summary stats of a bootstrap sample
+std::tuple<double, double, double, double, double> toyStats(std::vector<double> v)
 {
-    const double N = par[0];
-    const double f1 = par[1];
-    const double f2 = 1.0 - f1;
-
-    double chi2 = 0.0;
-    const int nBins = FitGlobals::gExp->GetNbinsX();
-
-    for (int i = 1; i <= nBins; i++)
-    {
-        const double data = FitGlobals::gExp->GetBinContent(i);
-        const double err = FitGlobals::gExp->GetBinError(i);
-        if (err <= 0)
-            continue;
-
-        const double model = N * (f1 * FitGlobals::gT1->GetBinContent(i) + f2 * FitGlobals::gT2->GetBinContent(i));
-
-        const double diff = data - model;
-        chi2 += (diff * diff) / (err * err);
-    }
-
-    f = chi2;
-}
-
-struct FitResult
-{
-    double N;
-    double f1;
-    double chi2;
-    bool converged;
-};
-
-FitResult doFit(double N_init, double f1_init, bool verbose = false)
-{
-    TMinuit *minuit = new TMinuit(2);
-    minuit->SetFCN(chi2Function);
-    minuit->SetPrintLevel(verbose ? 1 : -1);
-
-    double arglist[2];
-    int ierflg = 0;
-    arglist[0] = 1.0;
-    minuit->mnexcm("SET ERR", arglist, 1, ierflg);
-
-    minuit->mnparm(0, "N", N_init, N_init * 0.01, 0.0, 10.0 * N_init, ierflg);
-    minuit->mnparm(1, "f1", f1_init, 0.05, 0.0, 1.0, ierflg);
-
-    arglist[0] = 5000;
-    arglist[1] = 0.01;
-    minuit->mnexcm("MIGRAD", arglist, 2, ierflg);
-
-    FitResult res;
-    double dummy;
-    minuit->GetParameter(0, res.N, dummy);
-    minuit->GetParameter(1, res.f1, dummy);
-
-    double edm, errdef;
-    int nvpar, nparx, icstat;
-    minuit->mnstat(res.chi2, edm, errdef, nvpar, nparx, icstat);
-    res.converged = (ierflg == 0);
-
-    delete minuit;
-    return res;
+    std::sort(v.begin(), v.end());
+    const int n = v.size();
+    double mean = 0.0;
+    for (double x : v)
+        mean += x;
+    mean /= n;
+    double var = 0.0;
+    for (double x : v)
+        var += (x - mean) * (x - mean);
+    const double sigma = std::sqrt(var / (n - 1));
+    const double p16 = v[(int)(0.16 * n)];
+    const double p50 = v[(int)(0.50 * n)];
+    const double p84 = v[(int)(0.84 * n)];
+    return std::make_tuple(mean, sigma, p16, p50, p84);
 }
 
 void fitMomdis()
 {
+    using namespace RooFit;
+
+    // Silence RooFit chatter in the bootstrap loop
+    RooMsgService::instance().setGlobalKillBelow(RooFit::WARNING);
+
+    // =====================================================================
+    // Inputs
+    // =====================================================================
     std::vector<std::string> inFilesTheo = {
-        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_s12-gs.txt",
         "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_d52-gs.txt",
+        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_s12-gs.txt",
     };
+    std::vector<std::string> labels = {"1d_{5/2}", "2s_{1/2}", "1p_{1/2}"};
+    std::vector<int> colors = {kBlue, kGreen + 2, kMagenta, kCyan + 1, kOrange + 7, kViolet};
+
     std::string inFileExp = "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/24O_analyzed_test.root";
 
-    auto momdis_2s12_gs = getMomentaDistFromtxt(inFilesTheo[0], "2s12_gs");
-    auto momdis_1d52_gs = getMomentaDistFromtxt(inFilesTheo[1], "1d52_gs");
+    const int nC = (int)inFilesTheo.size();
 
-    auto momdis_exp = getMomentaDistFromRoot(inFileExp);
+    // Read experimental histogram and build templates in the same binning
+    auto *h_exp = getMomentaDistFromRoot(inFileExp);
 
-    TH1F *tmpl_s12 = buildTemplate(momdis_2s12_gs.Qt, momdis_exp, "tmpl_s12");
-    TH1F *tmpl_d52 = buildTemplate(momdis_1d52_gs.Qt, momdis_exp, "tmpl_d52");
-
-    FitGlobals::gT1 = tmpl_s12;
-    FitGlobals::gT2 = tmpl_d52;
-
-    // =====================================================================
-    // Fit over real data
-    // =====================================================================
-    FitGlobals::gExp = momdis_exp;
-
-    const double N0 = momdis_exp->Integral();
-    FitResult nominal = doFit(N0, 0.5, true);
-
-    std::cout << "\n=== Fit ===\n";
-    std::cout << "N     = " << nominal.N << "\n";
-    std::cout << "f1    = " << nominal.f1 << " (2s1/2)\n";
-    std::cout << "f2    = " << 1.0 - nominal.f1 << " (1d5/2)\n";
-    std::cout << "chi2  = " << nominal.chi2 << "\n";
-    std::cout << "===================\n\n";
+    std::vector<TH1F *> templates(nC);
+    for (int k = 0; k < nC; k++)
+    {
+        auto momdis = getMomentaDistFromtxt(inFilesTheo[k], Form("theo_%d", k));
+        templates[k] = buildTemplate(momdis.Qt, h_exp, Form("tmpl_%d", k));
+    }
 
     // =====================================================================
-    // Poissonian fluctuations over real data
+    // Build the RooFit model
+    // =====================================================================
+    const double xmin = h_exp->GetXaxis()->GetXmin();
+    const double xmax = h_exp->GetXaxis()->GetXmax();
+
+    // 1. Observable
+    RooRealVar x("x", "p_{x} [MeV/c]", xmin, xmax);
+
+    // 2. Convert each template TH1F into a RooHistPdf
+    //    We keep the RooDataHist objects alive in a vector to avoid them going
+    //    out of scope while the PDFs still reference them.
+    std::vector<RooDataHist *> dh_tmpl(nC);
+    std::vector<RooHistPdf *> pdf_tmpl(nC);
+    for (int k = 0; k < nC; k++)
+    {
+        dh_tmpl[k] = new RooDataHist(Form("dh_tmpl_%d", k),
+                                     Form("dh_tmpl_%d", k),
+                                     RooArgList(x), templates[k]);
+        // order=0 -> piecewise-constant interpolation (matches the binned fit)
+        pdf_tmpl[k] = new RooHistPdf(Form("pdf_tmpl_%d", k),
+                                     Form("pdf %s", labels[k].c_str()),
+                                     RooArgSet(x), *dh_tmpl[k], 0);
+    }
+
+    // 3. Fractions: nC-1 free parameters, the last is 1 - sum automatically
+    std::vector<RooRealVar *> frac(nC - 1);
+    RooArgList fracList;
+    for (int k = 0; k < nC - 1; k++)
+    {
+        frac[k] = new RooRealVar(Form("f%d", k + 1),
+                                 Form("fraction %s", labels[k].c_str()),
+                                 1.0 / nC, 0.0, 1.0);
+        fracList.add(*frac[k]);
+    }
+
+    // 4. Composite model (recursive=false: last fraction = 1 - sum)
+    RooArgList pdfList;
+    for (int k = 0; k < nC; k++)
+        pdfList.add(*pdf_tmpl[k]);
+
+    RooAddPdf model("model", "sum of templates", pdfList, fracList);
+
+    // =====================================================================
+    // Nominal fit on real data
+    // =====================================================================
+    RooDataHist data("data", "experimental data", RooArgList(x), h_exp);
+
+    // Extended=false because we are fitting fractions, not absolute yields.
+    // SumW2Error(true) is appropriate when the data histogram is a count
+    // histogram with Poisson statistics.
+    std::unique_ptr<RooFitResult> fitRes(
+        model.fitTo(data, Save(true), PrintLevel(-1), Minos(true)));
+
+    // Collect nominal fractions (including the derived last one)
+    std::vector<double> frac_nom(nC);
+    std::vector<double> frac_err(nC);
+    double sumF = 0.0;
+    for (int k = 0; k < nC - 1; k++)
+    {
+        frac_nom[k] = frac[k]->getVal();
+        frac_err[k] = frac[k]->getError();
+        sumF += frac_nom[k];
+    }
+    frac_nom[nC - 1] = 1.0 - sumF;
+
+    // Error on the last (derived) fraction via error propagation with cov matrix
+    {
+        const TMatrixDSym &cov = fitRes->covarianceMatrix();
+        // variance of sum of free fractions
+        double var = 0.0;
+        for (int i = 0; i < nC - 1; i++)
+            for (int j = 0; j < nC - 1; j++)
+                var += cov(i, j);
+        frac_err[nC - 1] = std::sqrt(std::max(0.0, var));
+    }
+
+    const double Ntot = h_exp->Integral();
+
+    std::cout << "\n=== Nominal RooFit result ===\n";
+    std::cout << "N (data) = " << Ntot << "\n";
+    for (int k = 0; k < nC; k++)
+        std::cout << "f(" << labels[k] << ") = " << frac_nom[k]
+                  << " +/- " << frac_err[k] << " (Minos/cov)\n";
+    std::cout << "MIGRAD status = " << fitRes->status()
+              << "  covQual = " << fitRes->covQual()
+              << "  minNll = " << fitRes->minNll() << "\n";
+
+    // Chi2 from the binned model vs binned data
+    RooChi2Var chi2Var("chi2Var", "chi2Var", model, data, DataError(RooAbsData::Poisson));
+    const double chi2 = chi2Var.getVal();
+    const int nPar = nC - 1; // free fractions in RooAddPdf
+    const int ndf = h_exp->GetNbinsX() - nPar;
+    const double chi2ndf = (ndf > 0) ? (chi2 / ndf) : -1.0;
+
+    std::cout << "chi2 = " << chi2
+              << "  ndf = " << ndf
+              << "  chi2/ndf = " << chi2ndf << "\n";
+    std::cout << "============================\n\n";
+
+    // =====================================================================
+    // Bootstrap: Poisson toys over the experimental histogram
     // =====================================================================
     const int nToys = 1000;
-    TRandom3 rng(0); // random seed
+    TRandom3 rng(0);
 
-    TH1F *hExpToy = (TH1F *)momdis_exp->Clone("hExpToy");
-    FitGlobals::gExp = hExpToy;
+    const int nBins = h_exp->GetNbinsX();
+    TH1F *h_toy = (TH1F *)h_exp->Clone("h_toy");
 
-    // Histograms to store parameter distributions
-    TH1F *hN = new TH1F("hN", "Bootstrap N;N;toys", 100,
-                        nominal.N * 0.9, nominal.N * 1.1);
-    TH1F *hF1 = new TH1F("hF1", "Bootstrap f(2s_{1/2});f_{1};toys", 100, -0.1, 1.1);
-    TH1F *hF2 = new TH1F("hF2", "Bootstrap f(1d_{5/2});f_{2};toys", 100, -0.1, 1.1);
+    // Histograms to visualise the bootstrap distributions
+    std::vector<TH1F *> hF(nC);
+    for (int k = 0; k < nC; k++)
+        hF[k] = new TH1F(Form("hF%d", k + 1),
+                         Form("Bootstrap f(%s);f_{%d};toys", labels[k].c_str(), k + 1),
+                         100, -0.1, 1.1);
 
-    std::vector<double> v_N, v_f1, v_f2;
-    v_N.reserve(nToys);
-    v_f1.reserve(nToys);
-    v_f2.reserve(nToys);
+    std::vector<std::vector<double>> v_frac(nC);
+    for (int k = 0; k < nC; k++)
+        v_frac[k].reserve(nToys);
 
     int nFailed = 0;
-    const int nBins = momdis_exp->GetNbinsX();
-
     std::cout << "Running " << nToys << " bootstrap toys...\n";
 
     for (int t = 0; t < nToys; t++)
     {
+        // Poisson fluctuation of each bin
         for (int i = 1; i <= nBins; i++)
         {
-            const double mu = momdis_exp->GetBinContent(i);
+            const double mu = h_exp->GetBinContent(i);
             const double k = rng.Poisson(mu);
-            hExpToy->SetBinContent(i, k);
-            hExpToy->SetBinError(i, (k > 0) ? std::sqrt(k) : 1.0);
+            h_toy->SetBinContent(i, k);
         }
 
-        FitResult r = doFit(nominal.N, nominal.f1, false);
+        // Re-create the RooDataHist for the toy
+        RooDataHist d_toy("d_toy", "toy", RooArgList(x), h_toy);
 
-        if (!r.converged)
+        // Reset fit parameters to the nominal values
+        for (int k = 0; k < nC - 1; k++)
+            frac[k]->setVal(frac_nom[k]);
+
+        std::unique_ptr<RooFitResult> r(
+            model.fitTo(d_toy, Save(true), PrintLevel(-1), Warnings(false)));
+
+        if (!r || r->status() != 0)
         {
             nFailed++;
             continue;
         }
 
-        const double f2 = 1.0 - r.f1;
-        v_N.push_back(r.N);
-        v_f1.push_back(r.f1);
-        v_f2.push_back(f2);
-
-        hN->Fill(r.N);
-        hF1->Fill(r.f1);
-        hF2->Fill(f2);
+        double sum_t = 0.0;
+        for (int k = 0; k < nC - 1; k++)
+        {
+            const double fv = frac[k]->getVal();
+            v_frac[k].push_back(fv);
+            hF[k]->Fill(fv);
+            sum_t += fv;
+        }
+        const double flast = 1.0 - sum_t;
+        v_frac[nC - 1].push_back(flast);
+        hF[nC - 1]->Fill(flast);
 
         if ((t + 1) % 100 == 0)
             std::cout << "  toy " << t + 1 << "/" << nToys << "\n";
     }
-
-    std::cout << "Failed toys: " << nFailed << "/" << nToys << "\n";
+    std::cout << "Failed toys: " << nFailed << "/" << nToys << "\n\n";
 
     // =====================================================================
-    // One sigma statistics (confidence level)
+    // Bootstrap statistics
     // =====================================================================
-    auto stats = [](std::vector<double> v)
-    {
-        std::sort(v.begin(), v.end());
-        const int n = v.size();
-        double mean = 0.0;
-        for (double x : v)
-            mean += x;
-        mean /= n;
-        double var = 0.0;
-        for (double x : v)
-            var += (x - mean) * (x - mean);
-        const double sigma = std::sqrt(var / (n - 1));
-        const double p16 = v[(int)(0.16 * n)];
-        const double p50 = v[(int)(0.50 * n)];
-        const double p84 = v[(int)(0.84 * n)];
-        return std::make_tuple(mean, sigma, p16, p50, p84);
-    };
-
-    auto [meanN, sigN, p16N, p50N, p84N] = stats(v_N);
-    auto [meanF1, sigF1, p16F1, p50F1, p84F1] = stats(v_f1);
-    auto [meanF2, sigF2, p16F2, p50F2, p84F2] = stats(v_f2);
-
-    std::cout << "\n=== Bootstrap results (" << v_N.size() << " toys) ===\n";
+    std::vector<double> sigF_bs(nC);
+    std::cout << "=== Bootstrap results (" << v_frac[0].size() << " toys) ===\n";
     std::cout << std::fixed;
     std::cout.precision(4);
-    std::cout << "N      : mean = " << meanN << "  sigma = " << sigN
-              << "   median = " << p50N << "  [68% CI: " << p16N << ", " << p84N << "]\n";
-    std::cout << "f(s12) : mean = " << meanF1 << "  sigma = " << sigF1
-              << "   median = " << p50F1 << "  [68% CI: " << p16F1 << ", " << p84F1 << "]\n";
-    std::cout << "f(d52) : mean = " << meanF2 << "  sigma = " << sigF2
-              << "   median = " << p50F2 << "  [68% CI: " << p16F2 << ", " << p84F2 << "]\n";
-    std::cout << "=======================================\n\n";
-
-    std::cout << "Final result (nominal pm bootstrap sigma):\n";
-    std::cout << "  f(2s1/2) = " << nominal.f1 << " +/- " << sigF1 << "\n";
-    std::cout << "  f(1d5/2) = " << 1.0 - nominal.f1 << " +/- " << sigF2 << "\n\n";
-
-    // =====================================================================
-    // Draw everything
-    // =====================================================================
-    TCanvas *c1 = new TCanvas("c1", "Fit", 800, 600);
-
-    TH1F *comp_s12 = (TH1F *)tmpl_s12->Clone("comp_s12");
-    TH1F *comp_d52 = (TH1F *)tmpl_d52->Clone("comp_d52");
-    TH1F *total = (TH1F *)tmpl_s12->Clone("fit_total");
-
-    comp_s12->Scale(nominal.N * nominal.f1);
-    comp_d52->Scale(nominal.N * (1.0 - nominal.f1));
-
-    for (int i = 1; i <= total->GetNbinsX(); i++)
+    for (int k = 0; k < nC; k++)
     {
-        total->SetBinContent(i, comp_s12->GetBinContent(i) + comp_d52->GetBinContent(i));
-        total->SetBinError(i, 0);
+        auto [mean, sig, p16, p50, p84] = toyStats(v_frac[k]);
+        sigF_bs[k] = sig;
+        std::cout << "f(" << labels[k] << ") : mean = " << mean
+                  << "  sigma = " << sig
+                  << "   median = " << p50
+                  << "  [68% CI: " << p16 << ", " << p84 << "]\n";
     }
+    std::cout << "=========================================\n\n";
 
-    comp_s12->SetLineColor(kBlue);
-    comp_s12->SetLineStyle(2);
-    comp_s12->SetLineWidth(2);
-    comp_d52->SetLineColor(kGreen + 2);
-    comp_d52->SetLineStyle(2);
-    comp_d52->SetLineWidth(2);
-    total->SetLineColor(kRed);
-    total->SetLineWidth(2);
+    std::cout << "=== Comparison: Minos vs bootstrap sigma ===\n";
+    for (int k = 0; k < nC; k++)
+        std::cout << "f(" << labels[k] << ") : nominal = " << frac_nom[k]
+                  << "   Minos = " << frac_err[k]
+                  << "   bootstrap = " << sigF_bs[k] << "\n";
+    std::cout << "===========================================\n\n";
 
-    momdis_exp->Draw("Ep");
-    total->Draw("same hist");
-    comp_s12->Draw("same hist");
-    comp_d52->Draw("same hist");
+    // =====================================================================
+    // Plots
+    // =====================================================================
+    // ---- Canvas 1: fit result with RooFit's native plotting ----
+    TCanvas *c1 = new TCanvas("c1", "RooFit template fit", 800, 600);
 
-    auto *leg = new TLegend(0.60, 0.65, 0.89, 0.89);
-    leg->AddEntry(momdis_exp, "Exp", "ep");
-    leg->AddEntry(total, "Fit total", "l");
-    leg->AddEntry(comp_s12, Form("2s_{1/2} (%.1f #pm %.1f)%%", nominal.f1 * 100, sigF1 * 100), "l");
-    leg->AddEntry(comp_d52, Form("1d_{5/2} (%.1f #pm %.1f)%%", (1.0 - nominal.f1) * 100, sigF2 * 100), "l");
+    RooPlot *xframe = x.frame(Title("Template fit (RooFit)"));
+    data.plotOn(xframe, Name("data"));
+    model.plotOn(xframe, LineColor(kRed), LineWidth(2), Name("total"));
+
+    // Individual components drawn dashed
+    for (int k = 0; k < nC; k++)
+    {
+        model.plotOn(xframe,
+                     Components(*pdf_tmpl[k]),
+                     LineStyle(kDashed),
+                     LineColor(colors[k % colors.size()]),
+                     LineWidth(2),
+                     Name(Form("comp_%d", k)));
+    }
+    xframe->Draw();
+
+    auto *leg = new TLegend(0.55, 0.60, 0.89, 0.89);
+    leg->AddEntry(xframe->findObject("data"), "Exp", "ep");
+    leg->AddEntry(xframe->findObject("total"), "Fit total", "l");
+    for (int k = 0; k < nC; k++)
+        leg->AddEntry(xframe->findObject(Form("comp_%d", k)),
+                      Form("%s (%.1f #pm %.1f)%%",
+                           labels[k].c_str(),
+                           frac_nom[k] * 100, sigF_bs[k] * 100),
+                      "l");
     leg->Draw();
 
-    TCanvas *c2 = new TCanvas("c2", "Bootstrap distributions", 1200, 400);
-    c2->Divide(3, 1);
+    // ---- Canvas 2: bootstrap distributions of each fraction ----
+    TCanvas *c2 = new TCanvas("c2", "Bootstrap distributions", 400 * nC, 400);
+    c2->Divide(nC, 1);
+    for (int k = 0; k < nC; k++)
+    {
+        c2->cd(k + 1);
+        hF[k]->SetLineColor(colors[k % colors.size()]);
+        hF[k]->SetFillColorAlpha(colors[k % colors.size()], 0.3);
+        hF[k]->Draw();
 
-    c2->cd(1);
-    hN->SetLineColor(kBlack);
-    hN->SetFillColorAlpha(kGray, 0.5);
-    hN->Draw();
-
-    c2->cd(2);
-    hF1->SetLineColor(kBlue);
-    hF1->SetFillColorAlpha(kBlue, 0.3);
-    hF1->Draw();
-
-    c2->cd(3);
-    hF2->SetLineColor(kGreen + 2);
-    hF2->SetFillColorAlpha(kGreen + 2, 0.3);
-    hF2->Draw();
+        TLine *lnom = new TLine(frac_nom[k], 0, frac_nom[k], hF[k]->GetMaximum());
+        lnom->SetLineColor(kRed);
+        lnom->SetLineStyle(2);
+        lnom->SetLineWidth(2);
+        lnom->Draw();
+    }
 }
