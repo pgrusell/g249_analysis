@@ -56,7 +56,10 @@ TH1F *getMomentaDistFromRoot(std::string rootFile, int nBins = 50, double maxBin
     auto *tr = static_cast<TTree *>(f->Get("KinTree"));
 
     double py;
-    tr->SetBranchAddress("px_rf_rot", &py);
+    tr->SetBranchAddress("py_rf_rot", &py);
+
+    double erel;
+    tr->SetBranchAddress("Erel", &erel);
 
     double sum = 0.0;
     Long64_t n = 0;
@@ -65,8 +68,12 @@ TH1F *getMomentaDistFromRoot(std::string rootFile, int nBins = 50, double maxBin
     for (Long64_t i = 0; i < nEntries; ++i)
     {
         tr->GetEntry(i);
-        sum += py * 1000.0;
-        ++n;
+
+        if (erel * 1000 < 7 && erel * 1000 > 5)
+        {
+            sum += py * 1000.0;
+            ++n;
+        }
     }
 
     const double offset = (n > 0) ? sum / n : 0.0;
@@ -74,7 +81,9 @@ TH1F *getMomentaDistFromRoot(std::string rootFile, int nBins = 50, double maxBin
     for (Long64_t i = 0; i < nEntries; ++i)
     {
         tr->GetEntry(i);
-        h->Fill(py * 1000 - offset);
+
+        if (erel * 1000 < 7 && erel * 1000 > 5)
+            h->Fill(py * 1000 - offset);
     }
 
     return h;
@@ -145,13 +154,14 @@ void fitMomdis()
     // Inputs
     // =====================================================================
     std::vector<std::string> inFilesTheo = {
-        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_d52-gs.txt",
-        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_s12-gs.txt",
-    };
-    std::vector<std::string> labels = {"1d_{5/2}", "2s_{1/2}", "1p_{1/2}"};
+        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_d52-3.txt",
+        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_p12-3.txt",
+        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_s12-3.txt"};
+
+    std::vector<std::string> labels = {"1d_{5/2}", "p_{1/2}", "s_{1/2}"};
     std::vector<int> colors = {kBlue, kGreen + 2, kMagenta, kCyan + 1, kOrange + 7, kViolet};
 
-    std::string inFileExp = "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/24O_analyzed_test.root";
+    std::string inFileExp = "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/23O_analyzed_test.root";
 
     const int nC = (int)inFilesTheo.size();
 
@@ -359,6 +369,7 @@ void fitMomdis()
     // =====================================================================
     // Plots
     // =====================================================================
+
     // ---- Canvas 1: fit result with RooFit's native plotting ----
     TCanvas *c1 = new TCanvas("c1", "RooFit template fit", 800, 600);
 
