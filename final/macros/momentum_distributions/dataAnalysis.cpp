@@ -206,6 +206,7 @@ void DataAnalysis::getData(bool called)
     Double_t px_sys_CM, py_sys_CM, pz_sys_CM;
     Double_t opa_lab;
     Double_t px_rf_rot, py_rf_rot, pz_rf_rot;
+    Double_t AoQ_matched;
 
     if (called)
     {
@@ -338,6 +339,7 @@ void DataAnalysis::getData(bool called)
 
             // Double_t m_f = M_frag * 1000.;
 
+
             Double_t m_f = M_frag;
 
             Erel = std::sqrt(m_f * m_f + m_neut * m_neut +
@@ -439,7 +441,8 @@ void DataAnalysis::getData(bool called)
         TLorentzVector P4_proj_rot = RotateP4(P4_proj_lab);
 
         TLorentzVector P4_sys_CM = P4_sys_rot;
-        P4_sys_CM.Boost(TVector3(0.0, 0.0, -beta_proj)); // boost opposite to +Z
+        // P4_sys_CM.Boost(TVector3(0.0, 0.0, -beta_proj)); // boost opposite to +Z
+        P4_sys_CM.Boost(-P4_proj_rot.BoostVector()); // boost opposite to +Z
 
         px_sys = P4_sys_lab.Px();
         py_sys = P4_sys_lab.Py();

@@ -2,6 +2,7 @@
 #include <RooDataHist.h>
 #include <RooHistPdf.h>
 #include <RooAddPdf.h>
+#include <RooFormulaVar.h>
 #include <RooArgList.h>
 #include <RooArgSet.h>
 #include <RooPlot.h>
@@ -55,21 +56,34 @@ TH1F *getMomentaDistFromRoot(std::string rootFile, int nBins = 50, double maxBin
     auto *f = new TFile(rootFile.c_str());
     auto *tr = static_cast<TTree *>(f->Get("KinTree"));
 
-    double py;
+    double py, px;
+    tr->SetBranchAddress("px_rf_rot", &px);
     tr->SetBranchAddress("py_rf_rot", &py);
 
-    double erel;
-    tr->SetBranchAddress("Erel", &erel);
+    double erel = 100;
+    // tr->SetBranchAddress("Erel", &erel);∫
+
+    double opa;
+    tr->SetBranchAddress("califa_opa", &opa);
 
     double sum = 0.0;
     Long64_t n = 0;
     const Long64_t nEntries = tr->GetEntries();
 
+    // Peak 0
+    double erelMin = 0;
+    double erelMax = 1000;
+
+    // Peak 2
+    // double erelMin = 2;
+    // double erelMax = 4.5;
+
     for (Long64_t i = 0; i < nEntries; ++i)
     {
         tr->GetEntry(i);
 
-        if (erel * 1000 < 7 && erel * 1000 > 5)
+        // if (erel * 1000 < erelMax && erel * 1000 > erelMin)
+        if (opa > 1.25 && opa < 1.65)
         {
             sum += py * 1000.0;
             ++n;
@@ -82,8 +96,11 @@ TH1F *getMomentaDistFromRoot(std::string rootFile, int nBins = 50, double maxBin
     {
         tr->GetEntry(i);
 
-        if (erel * 1000 < 7 && erel * 1000 > 5)
+        // if (erel * 1000 < erelMax && erel * 1000 > erelMin)
+        if (opa > 1.25 && opa < 1.65)
+        {
             h->Fill(py * 1000 - offset);
+        }
     }
 
     return h;
@@ -143,6 +160,30 @@ std::tuple<double, double, double, double, double> toyStats(std::vector<double> 
     return std::make_tuple(mean, sigma, p16, p50, p84);
 }
 
+// ---------------------------------------------------------------------------
+// Convert recursive fractions (a_0, a_1, ..., a_{N-2}) into physical fractions
+// (phi_0, ..., phi_{N-1}) following the RooAddPdf recursive convention:
+//
+//   phi_0     = a_0
+//   phi_1     = (1 - a_0) * a_1
+//   phi_2     = (1 - a_0) * (1 - a_1) * a_2
+//   ...
+//   phi_{N-1} = (1 - a_0) * (1 - a_1) * ... * (1 - a_{N-2})
+// ---------------------------------------------------------------------------
+std::vector<double> recursiveToPhysical(const std::vector<double> &a)
+{
+    const int N = (int)a.size() + 1;
+    std::vector<double> phi(N);
+    double remain = 1.0;
+    for (int k = 0; k < N - 1; k++)
+    {
+        phi[k] = remain * a[k];
+        remain *= (1.0 - a[k]);
+    }
+    phi[N - 1] = remain;
+    return phi;
+}
+
 void fitMomdis()
 {
     using namespace RooFit;
@@ -154,14 +195,15 @@ void fitMomdis()
     // Inputs
     // =====================================================================
     std::vector<std::string> inFilesTheo = {
-        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_d52-3.txt",
-        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_p12-3.txt",
-        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_s12-3.txt"};
+        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_d52-gs.txt",
+        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_s12-gs.txt",
+        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_p12-gs.txt",
+        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_p32-gs.txt"};
 
-    std::vector<std::string> labels = {"1d_{5/2}", "p_{1/2}", "s_{1/2}"};
+    std::vector<std::string> labels = {"1d_{5/2}", "2s_{1/2}", "1p_{1/2}", "1p_{3/2}"};
     std::vector<int> colors = {kBlue, kGreen + 2, kMagenta, kCyan + 1, kOrange + 7, kViolet};
 
-    std::string inFileExp = "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/23O_analyzed_test.root";
+    std::string inFileExp = "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/24O_analyzed_test.root";
 
     const int nC = (int)inFilesTheo.size();
 
@@ -176,8 +218,21 @@ void fitMomdis()
     }
 
     // =====================================================================
-    // Build the RooFit model
+    // Build the RooFit model  (RECURSIVE FRACTIONS)
     // =====================================================================
+    //
+    // With recursiveFractions = true, RooAddPdf defines:
+    //   model = a_0 * pdf_0
+    //         + (1-a_0)*a_1                * pdf_1
+    //         + (1-a_0)*(1-a_1)*a_2        * pdf_2
+    //         + ...
+    //         + (1-a_0)*...*(1-a_{N-2})    * pdf_{N-1}
+    //
+    // Each a_k is free in [0,1], so every effective coefficient is
+    // automatically in [0,1] and they sum exactly to 1 by construction.
+    // This removes the "sum of coefficients > 1" pathology you were seeing
+    // with the non-recursive parametrisation.
+    //
     const double xmin = h_exp->GetXaxis()->GetXmin();
     const double xmax = h_exp->GetXaxis()->GetXmax();
 
@@ -185,8 +240,6 @@ void fitMomdis()
     RooRealVar x("x", "p_{x} [MeV/c]", xmin, xmax);
 
     // 2. Convert each template TH1F into a RooHistPdf
-    //    We keep the RooDataHist objects alive in a vector to avoid them going
-    //    out of scope while the PDFs still reference them.
     std::vector<RooDataHist *> dh_tmpl(nC);
     std::vector<RooHistPdf *> pdf_tmpl(nC);
     for (int k = 0; k < nC; k++)
@@ -194,71 +247,97 @@ void fitMomdis()
         dh_tmpl[k] = new RooDataHist(Form("dh_tmpl_%d", k),
                                      Form("dh_tmpl_%d", k),
                                      RooArgList(x), templates[k]);
-        // order=0 -> piecewise-constant interpolation (matches the binned fit)
         pdf_tmpl[k] = new RooHistPdf(Form("pdf_tmpl_%d", k),
                                      Form("pdf %s", labels[k].c_str()),
                                      RooArgSet(x), *dh_tmpl[k], 0);
     }
 
-    // 3. Fractions: nC-1 free parameters, the last is 1 - sum automatically
-    std::vector<RooRealVar *> frac(nC - 1);
+    // 3. Recursive fractions a_k, k = 0..nC-2
+    //    Start from a flat prior on the physical fractions:
+    //      a_0 = 1/N,  a_1 = 1/(N-1), a_2 = 1/(N-2), ...
+    //    which gives phi_k = 1/N for all k.
+    std::vector<RooRealVar *> a(nC - 1);
     RooArgList fracList;
     for (int k = 0; k < nC - 1; k++)
     {
-        frac[k] = new RooRealVar(Form("f%d", k + 1),
-                                 Form("fraction %s", labels[k].c_str()),
-                                 1.0 / nC, 0.0, 1.0);
-        fracList.add(*frac[k]);
+        const double init = 1.0 / (nC - k);
+        a[k] = new RooRealVar(Form("a%d", k),
+                              Form("recursive frac a_%d", k),
+                              init, 0.0, 1.0);
+        fracList.add(*a[k]);
     }
 
-    // 4. Composite model (recursive=false: last fraction = 1 - sum)
+    // 4. Composite model (recursiveFractions = true)
     RooArgList pdfList;
     for (int k = 0; k < nC; k++)
         pdfList.add(*pdf_tmpl[k]);
 
-    RooAddPdf model("model", "sum of templates", pdfList, fracList);
+    RooAddPdf model("model", "sum of templates",
+                    pdfList, fracList, /*recursiveFractions=*/true);
+
+    // 5. Build RooFormulaVars for the physical fractions so RooFit propagates
+    //    the covariance matrix automatically when we call getPropagatedError.
+    //    phi_k = [prod_{j<k} (1-a_j)] * a_k,   phi_{N-1} = prod_j (1-a_j)
+    std::vector<RooFormulaVar *> phi(nC);
+    for (int k = 0; k < nC; k++)
+    {
+        std::string expr;
+        RooArgList deps;
+        if (k < nC - 1)
+        {
+            // phi_k = (1-a_0)*(1-a_1)*...*(1-a_{k-1}) * a_k
+            for (int j = 0; j < k; j++)
+            {
+                expr += Form("(1-@%d)*", j);
+                deps.add(*a[j]);
+            }
+            expr += Form("@%d", k);
+            deps.add(*a[k]);
+        }
+        else
+        {
+            // phi_{N-1} = prod_{j=0}^{N-2} (1-a_j)
+            for (int j = 0; j < nC - 1; j++)
+            {
+                if (j > 0)
+                    expr += "*";
+                expr += Form("(1-@%d)", j);
+                deps.add(*a[j]);
+            }
+        }
+        phi[k] = new RooFormulaVar(Form("phi_%d", k),
+                                   Form("physical fraction %s", labels[k].c_str()),
+                                   expr.c_str(), deps);
+    }
 
     // =====================================================================
     // Nominal fit on real data
     // =====================================================================
     RooDataHist data("data", "experimental data", RooArgList(x), h_exp);
 
-    // Extended=false because we are fitting fractions, not absolute yields.
-    // SumW2Error(true) is appropriate when the data histogram is a count
-    // histogram with Poisson statistics.
     std::unique_ptr<RooFitResult> fitRes(
         model.fitTo(data, Save(true), PrintLevel(-1), Minos(true)));
 
-    // Collect nominal fractions (including the derived last one)
+    // Nominal physical fractions and their errors (propagated from cov matrix)
     std::vector<double> frac_nom(nC);
     std::vector<double> frac_err(nC);
-    double sumF = 0.0;
-    for (int k = 0; k < nC - 1; k++)
+    for (int k = 0; k < nC; k++)
     {
-        frac_nom[k] = frac[k]->getVal();
-        frac_err[k] = frac[k]->getError();
-        sumF += frac_nom[k];
-    }
-    frac_nom[nC - 1] = 1.0 - sumF;
-
-    // Error on the last (derived) fraction via error propagation with cov matrix
-    {
-        const TMatrixDSym &cov = fitRes->covarianceMatrix();
-        // variance of sum of free fractions
-        double var = 0.0;
-        for (int i = 0; i < nC - 1; i++)
-            for (int j = 0; j < nC - 1; j++)
-                var += cov(i, j);
-        frac_err[nC - 1] = std::sqrt(std::max(0.0, var));
+        frac_nom[k] = phi[k]->getVal();
+        frac_err[k] = phi[k]->getPropagatedError(*fitRes);
     }
 
     const double Ntot = h_exp->Integral();
 
-    std::cout << "\n=== Nominal RooFit result ===\n";
+    std::cout << "\n=== Nominal RooFit result (recursive fractions) ===\n";
     std::cout << "N (data) = " << Ntot << "\n";
+    for (int k = 0; k < nC - 1; k++)
+        std::cout << "a_" << k << " = " << a[k]->getVal()
+                  << " +/- " << a[k]->getError() << "\n";
+    std::cout << "--- physical fractions ---\n";
     for (int k = 0; k < nC; k++)
-        std::cout << "f(" << labels[k] << ") = " << frac_nom[k]
-                  << " +/- " << frac_err[k] << " (Minos/cov)\n";
+        std::cout << "phi(" << labels[k] << ") = " << frac_nom[k]
+                  << " +/- " << frac_err[k] << " (propagated)\n";
     std::cout << "MIGRAD status = " << fitRes->status()
               << "  covQual = " << fitRes->covQual()
               << "  minNll = " << fitRes->minNll() << "\n";
@@ -266,14 +345,19 @@ void fitMomdis()
     // Chi2 from the binned model vs binned data
     RooChi2Var chi2Var("chi2Var", "chi2Var", model, data, DataError(RooAbsData::Poisson));
     const double chi2 = chi2Var.getVal();
-    const int nPar = nC - 1; // free fractions in RooAddPdf
+    const int nPar = nC - 1; // free recursive fractions
     const int ndf = h_exp->GetNbinsX() - nPar;
     const double chi2ndf = (ndf > 0) ? (chi2 / ndf) : -1.0;
 
     std::cout << "chi2 = " << chi2
               << "  ndf = " << ndf
               << "  chi2/ndf = " << chi2ndf << "\n";
-    std::cout << "============================\n\n";
+    std::cout << "===================================================\n\n";
+
+    // Store the nominal values of the a_k for resetting during toys
+    std::vector<double> a_nom(nC - 1);
+    for (int k = 0; k < nC - 1; k++)
+        a_nom[k] = a[k]->getVal();
 
     // =====================================================================
     // Bootstrap: Poisson toys over the experimental histogram
@@ -284,11 +368,12 @@ void fitMomdis()
     const int nBins = h_exp->GetNbinsX();
     TH1F *h_toy = (TH1F *)h_exp->Clone("h_toy");
 
-    // Histograms to visualise the bootstrap distributions
+    // Histograms to visualise the bootstrap distributions of the PHYSICAL fractions
     std::vector<TH1F *> hF(nC);
     for (int k = 0; k < nC; k++)
         hF[k] = new TH1F(Form("hF%d", k + 1),
-                         Form("Bootstrap f(%s);f_{%d};toys", labels[k].c_str(), k + 1),
+                         Form("Bootstrap #phi(%s);#phi_{%d};toys",
+                              labels[k].c_str(), k + 1),
                          100, -0.1, 1.1);
 
     std::vector<std::vector<double>> v_frac(nC);
@@ -304,8 +389,8 @@ void fitMomdis()
         for (int i = 1; i <= nBins; i++)
         {
             const double mu = h_exp->GetBinContent(i);
-            const double k = rng.Poisson(mu);
-            h_toy->SetBinContent(i, k);
+            const double kcount = rng.Poisson(mu);
+            h_toy->SetBinContent(i, kcount);
         }
 
         // Re-create the RooDataHist for the toy
@@ -313,7 +398,7 @@ void fitMomdis()
 
         // Reset fit parameters to the nominal values
         for (int k = 0; k < nC - 1; k++)
-            frac[k]->setVal(frac_nom[k]);
+            a[k]->setVal(a_nom[k]);
 
         std::unique_ptr<RooFitResult> r(
             model.fitTo(d_toy, Save(true), PrintLevel(-1), Warnings(false)));
@@ -324,17 +409,17 @@ void fitMomdis()
             continue;
         }
 
-        double sum_t = 0.0;
+        // Convert the fitted recursive fractions to physical fractions
+        std::vector<double> aVals(nC - 1);
         for (int k = 0; k < nC - 1; k++)
+            aVals[k] = a[k]->getVal();
+        std::vector<double> phiVals = recursiveToPhysical(aVals);
+
+        for (int k = 0; k < nC; k++)
         {
-            const double fv = frac[k]->getVal();
-            v_frac[k].push_back(fv);
-            hF[k]->Fill(fv);
-            sum_t += fv;
+            v_frac[k].push_back(phiVals[k]);
+            hF[k]->Fill(phiVals[k]);
         }
-        const double flast = 1.0 - sum_t;
-        v_frac[nC - 1].push_back(flast);
-        hF[nC - 1]->Fill(flast);
 
         if ((t + 1) % 100 == 0)
             std::cout << "  toy " << t + 1 << "/" << nToys << "\n";
@@ -352,28 +437,27 @@ void fitMomdis()
     {
         auto [mean, sig, p16, p50, p84] = toyStats(v_frac[k]);
         sigF_bs[k] = sig;
-        std::cout << "f(" << labels[k] << ") : mean = " << mean
+        std::cout << "phi(" << labels[k] << ") : mean = " << mean
                   << "  sigma = " << sig
                   << "   median = " << p50
                   << "  [68% CI: " << p16 << ", " << p84 << "]\n";
     }
     std::cout << "=========================================\n\n";
 
-    std::cout << "=== Comparison: Minos vs bootstrap sigma ===\n";
+    std::cout << "=== Comparison: propagated vs bootstrap sigma ===\n";
     for (int k = 0; k < nC; k++)
-        std::cout << "f(" << labels[k] << ") : nominal = " << frac_nom[k]
-                  << "   Minos = " << frac_err[k]
+        std::cout << "phi(" << labels[k] << ") : nominal = " << frac_nom[k]
+                  << "   propagated = " << frac_err[k]
                   << "   bootstrap = " << sigF_bs[k] << "\n";
-    std::cout << "===========================================\n\n";
+    std::cout << "=================================================\n\n";
 
     // =====================================================================
     // Plots
     // =====================================================================
-
     // ---- Canvas 1: fit result with RooFit's native plotting ----
     TCanvas *c1 = new TCanvas("c1", "RooFit template fit", 800, 600);
 
-    RooPlot *xframe = x.frame(Title("Template fit (RooFit)"));
+    RooPlot *xframe = x.frame(Title("Template fit (RooFit, recursive fractions)"));
     data.plotOn(xframe, Name("data"));
     model.plotOn(xframe, LineColor(kRed), LineWidth(2), Name("total"));
 
@@ -400,7 +484,7 @@ void fitMomdis()
                       "l");
     leg->Draw();
 
-    // ---- Canvas 2: bootstrap distributions of each fraction ----
+    // ---- Canvas 2: bootstrap distributions of each physical fraction ----
     TCanvas *c2 = new TCanvas("c2", "Bootstrap distributions", 400 * nC, 400);
     c2->Divide(nC, 1);
     for (int k = 0; k < nC; k++)
