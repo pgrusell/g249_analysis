@@ -57,8 +57,8 @@ TH1F *getMomentaDistFromRoot(std::string rootFile, int nBins = 50, double maxBin
     auto *tr = static_cast<TTree *>(f->Get("KinTree"));
 
     double py, px;
-    tr->SetBranchAddress("px_rf_rot", &px);
-    tr->SetBranchAddress("py_rf_rot", &py);
+    tr->SetBranchAddress("py_rf_rot", &px);
+    tr->SetBranchAddress("px_rf_rot", &py);
 
     double erel = 100;
     // tr->SetBranchAddress("Erel", &erel);∫
@@ -83,6 +83,7 @@ TH1F *getMomentaDistFromRoot(std::string rootFile, int nBins = 50, double maxBin
         tr->GetEntry(i);
 
         // if (erel * 1000 < erelMax && erel * 1000 > erelMin)
+        // if (opa > 1.4 && opa < 1.5)
         if (opa > 1.25 && opa < 1.65)
         {
             sum += py * 1000.0;
@@ -98,6 +99,7 @@ TH1F *getMomentaDistFromRoot(std::string rootFile, int nBins = 50, double maxBin
 
         // if (erel * 1000 < erelMax && erel * 1000 > erelMin)
         if (opa > 1.25 && opa < 1.65)
+        // if (opa > 1.4 && opa < 1.5)
         {
             h->Fill(py * 1000 - offset);
         }
@@ -197,10 +199,10 @@ void fitMomdis()
     std::vector<std::string> inFilesTheo = {
         "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_d52-gs.txt",
         "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_s12-gs.txt",
-        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_p12-gs.txt",
-        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_p32-gs.txt"};
+        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_p32-gs.txt",
+        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_p12-gs.txt"};
 
-    std::vector<std::string> labels = {"1d_{5/2}", "2s_{1/2}", "1p_{1/2}", "1p_{3/2}"};
+    std::vector<std::string> labels = {"1d_{5/2}", "2s_{1/2}", "1p_{3/2}", "1p_{1/2}"};
     std::vector<int> colors = {kBlue, kGreen + 2, kMagenta, kCyan + 1, kOrange + 7, kViolet};
 
     std::string inFileExp = "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/24O_analyzed_test.root";
