@@ -6,6 +6,8 @@
 #include <TLegend.h>
 #include <TFile.h>
 #include <TTree.h>
+#include <TF1.h>
+#include <TMath.h>
 #include <fstream>
 #include <sstream>
 #include <vector>
@@ -270,11 +272,94 @@ struct FitResultN
 {
     double N;
     std::vector<double> phi; // physical fractions
+
+    // Symmetric (parabolic / HESSE-like) errors returned by Minuit
+    double N_err;
+    std::vector<double> phi_err;
+
+    // Asymmetric MINOS errors (positive and negative branches)
+    // For the recursive parameters first, then propagated to phi.
+    double N_eplus;
+    double N_eminus;
+    std::vector<double> phi_eplus;
+    std::vector<double> phi_eminus;
+
     double chi2;
+    int ndf;
     bool converged;
 };
 
-FitResultN doFitN(double N_init, const std::vector<double> &phi_init, bool verbose = false)
+// ---------------------------------------------------------------------------
+// Propagate MINOS errors from the recursive parameters a_k to the physical
+// fractions phi_k via numerical differentiation (Jacobian).
+// We treat eplus and eminus as 1-sigma intervals and propagate them as if
+// they were symmetric around the recursive parameter -- this is the standard
+// linear propagation and is fine when the asymmetry is moderate.
+// ---------------------------------------------------------------------------
+static void propagateMinosToPhi(const std::vector<double> &a_central,
+                                const std::vector<double> &a_eplus,
+                                const std::vector<double> &a_eminus,
+                                std::vector<double> &phi_eplus,
+                                std::vector<double> &phi_eminus)
+{
+    const int nA = (int)a_central.size();
+    const int nC = nA + 1;
+
+    // Jacobian J[k][j] = d phi_k / d a_j   evaluated at a_central
+    // Computed by forward finite differences.
+    std::vector<std::vector<double>> J(nC, std::vector<double>(nA, 0.0));
+    const std::vector<double> phi0 = recursiveToPhysical(a_central);
+
+    for (int j = 0; j < nA; j++)
+    {
+        const double h = std::max(1e-6, 1e-4 * std::max(1.0, std::fabs(a_central[j])));
+        std::vector<double> a_pert = a_central;
+        a_pert[j] += h;
+        if (a_pert[j] > 1.0)
+            a_pert[j] = 1.0;
+        if (a_pert[j] < 0.0)
+            a_pert[j] = 0.0;
+        const double dh = a_pert[j] - a_central[j];
+        if (std::fabs(dh) < 1e-15)
+            continue;
+        const std::vector<double> phi_pert = recursiveToPhysical(a_pert);
+        for (int k = 0; k < nC; k++)
+            J[k][j] = (phi_pert[k] - phi0[k]) / dh;
+    }
+
+    // Linear (uncorrelated-in-quadrature) propagation. This is an
+    // approximation: it ignores correlations between the a_k. For a more
+    // rigorous treatment one would need Minuit's full covariance matrix.
+    phi_eplus.assign(nC, 0.0);
+    phi_eminus.assign(nC, 0.0);
+    for (int k = 0; k < nC; k++)
+    {
+        double sp = 0.0, sm = 0.0;
+        for (int j = 0; j < nA; j++)
+        {
+            // For each component of phi, the sign of dphi/da decides
+            // which branch of the asymmetric error contributes to + and -.
+            const double Jkj = J[k][j];
+            const double ep = a_eplus[j];
+            const double em = std::fabs(a_eminus[j]);
+            if (Jkj >= 0)
+            {
+                sp += (Jkj * ep) * (Jkj * ep);
+                sm += (Jkj * em) * (Jkj * em);
+            }
+            else
+            {
+                sp += (Jkj * em) * (Jkj * em);
+                sm += (Jkj * ep) * (Jkj * ep);
+            }
+        }
+        phi_eplus[k] = std::sqrt(sp);
+        phi_eminus[k] = std::sqrt(sm);
+    }
+}
+
+FitResultN doFitN(double N_init, const std::vector<double> &phi_init,
+                  bool verbose = false, bool runMinos = false)
 {
     const int nC = (int)FitGlobals::gT.size();
     const int nPar = 1 + (nC - 1); // N + (nC-1) recursive fractions
@@ -302,18 +387,79 @@ FitResultN doFitN(double N_init, const std::vector<double> &phi_init, bool verbo
 
     FitResultN res;
     res.phi.assign(nC, 0.0);
-    double dummy;
+    res.phi_err.assign(nC, 0.0);
+    res.phi_eplus.assign(nC, 0.0);
+    res.phi_eminus.assign(nC, 0.0);
+    res.N_eplus = 0.0;
+    res.N_eminus = 0.0;
 
-    minuit->GetParameter(0, res.N, dummy);
+    double dummy;
+    double parErr;
+
+    // Central values + parabolic (HESSE) errors
+    minuit->GetParameter(0, res.N, res.N_err);
     std::vector<double> a(nC - 1);
+    std::vector<double> a_err(nC - 1);
     for (int k = 0; k < nC - 1; k++)
-        minuit->GetParameter(1 + k, a[k], dummy);
+        minuit->GetParameter(1 + k, a[k], a_err[k]);
     res.phi = recursiveToPhysical(a);
+
+    // Propagate parabolic errors on a_k to phi_k via the Jacobian (treating
+    // a_err as symmetric eplus = eminus = a_err).
+    {
+        std::vector<double> a_eplus = a_err;
+        std::vector<double> a_eminus = a_err;
+        std::vector<double> phi_ep, phi_em;
+        propagateMinosToPhi(a, a_eplus, a_eminus, phi_ep, phi_em);
+        // For symmetric input the two propagated branches are equal -> use either.
+        for (int k = 0; k < nC; k++)
+            res.phi_err[k] = phi_ep[k];
+    }
+
+    // -----------------------------------------------------------------------
+    // MINOS: asymmetric errors. We run it once, then read eplus/eminus per
+    // parameter. Note that for fractions on the boundary [0,1] MINOS may
+    // hit the limit and return the parabolic error instead.
+    // -----------------------------------------------------------------------
+    if (runMinos)
+    {
+        arglist[0] = 5000;
+        // call MINOS for all parameters
+        minuit->mnexcm("MINOS", arglist, 1, ierflg);
+
+        double eplus, eminus, eparab, gcc;
+        // Parameter 0 = N
+        minuit->mnerrs(0, eplus, eminus, eparab, gcc);
+        res.N_eplus = eplus;
+        res.N_eminus = std::fabs(eminus);
+
+        // Parameters 1..nC-1 = a_k
+        std::vector<double> a_eplus(nC - 1, 0.0);
+        std::vector<double> a_eminus(nC - 1, 0.0);
+        for (int k = 0; k < nC - 1; k++)
+        {
+            minuit->mnerrs(1 + k, eplus, eminus, eparab, gcc);
+            // Fall back to parabolic if MINOS returned 0 (limits hit etc.)
+            a_eplus[k] = (eplus != 0.0) ? eplus : eparab;
+            a_eminus[k] = (eminus != 0.0) ? std::fabs(eminus) : eparab;
+        }
+
+        // Propagate to physical fractions
+        propagateMinosToPhi(a, a_eplus, a_eminus,
+                            res.phi_eplus, res.phi_eminus);
+    }
 
     double edm, errdef;
     int nvpar, nparx, icstat;
     minuit->mnstat(res.chi2, edm, errdef, nvpar, nparx, icstat);
     res.converged = (ierflg == 0);
+
+    // ndf = nBins (with err>0) - nFreePars
+    int nBinsUsed = 0;
+    for (int i = 1; i <= FitGlobals::gExp->GetNbinsX(); i++)
+        if (FitGlobals::gExp->GetBinError(i) > 0)
+            nBinsUsed++;
+    res.ndf = nBinsUsed - nPar;
 
     delete minuit;
     return res;
@@ -353,7 +499,7 @@ void testFitMomdis()
     // Truth used to generate the fake data. Make sure they sum to 1.
     // Order: 1d_{5/2} , 2s_{1/2} , 1p_{1/2} , 1p_{3/2}
     std::vector<std::string> labels = {"1p_{3/2}", "1p_{1/2}", "1s_{1/2}", "1d_{5/2}"};
-    std::vector<double> phi_true = {0.5, 0.5, 0.0, 0.0};
+    std::vector<double> phi_true = {0.5, 0.0, 0.5, 0.0};
 
     // sanity check
     {
@@ -367,7 +513,7 @@ void testFitMomdis()
         }
     }
 
-    const double N_true = 6000;
+    const double N_true = 600000;
     const int nToys = 1000;
     const int fitNBins = 50;
     const double fitMax = 300.0;
@@ -412,20 +558,27 @@ void testFitMomdis()
               << "  integral = " << hFake->Integral() << "\n\n";
 
     // -------------------------------------------------------------------------
-    // Nominal fit on fake data (seeded at flat physical fractions)
+    // Nominal fit on fake data (seeded at flat physical fractions) + MINOS
     // -------------------------------------------------------------------------
     FitGlobals::gExp = hFake;
 
     std::vector<double> phi_seed(nC, 1.0 / nC);
-    FitResultN nominal = doFitN(hFake->Integral(), phi_seed, true);
+    FitResultN nominal = doFitN(hFake->Integral(), phi_seed,
+                                /*verbose*/ true, /*runMinos*/ true);
 
     std::cout << "\n=== Nominal fit on fake data ===\n";
-    std::cout << "N    = " << nominal.N << "   (truth: " << N_true << ")\n";
+    std::cout << "N    = " << nominal.N
+              << "  +/- " << nominal.N_err
+              << "  (MINOS +" << nominal.N_eplus
+              << " / -" << nominal.N_eminus << ")"
+              << "   (truth: " << N_true << ")\n";
     for (int k = 0; k < nC; k++)
         std::cout << "phi(" << labels[k] << ") = " << nominal.phi[k]
+                  << "  +/- " << nominal.phi_err[k]
+                  << "  (MINOS +" << nominal.phi_eplus[k]
+                  << " / -" << nominal.phi_eminus[k] << ")"
                   << "   (truth: " << phi_true[k] << ")\n";
-    std::cout << "chi2 = " << nominal.chi2 << "  (ndf = "
-              << fitNBins - (1 + (nC - 1)) << ")\n";
+    std::cout << "chi2 = " << nominal.chi2 << "  (ndf = " << nominal.ndf << ")\n";
     std::cout << "================================\n\n";
 
     // -------------------------------------------------------------------------
@@ -435,14 +588,30 @@ void testFitMomdis()
 
     std::vector<std::vector<double>> v_phi_bs(nC);
     std::vector<double> v_N_bs;
+    std::vector<double> v_chi2_bs;
+    std::vector<int> v_ndf_bs;
+    // Also collect the MINOS errors per toy for diagnostic plots
+    std::vector<std::vector<double>> v_phi_eplus_bs(nC);
+    std::vector<std::vector<double>> v_phi_eminus_bs(nC);
+    std::vector<double> v_N_eplus_bs;
+    std::vector<double> v_N_eminus_bs;
+
     v_N_bs.reserve(nToys);
+    v_chi2_bs.reserve(nToys);
+    v_ndf_bs.reserve(nToys);
+    v_N_eplus_bs.reserve(nToys);
+    v_N_eminus_bs.reserve(nToys);
     for (int k = 0; k < nC; k++)
+    {
         v_phi_bs[k].reserve(nToys);
+        v_phi_eplus_bs[k].reserve(nToys);
+        v_phi_eminus_bs[k].reserve(nToys);
+    }
 
     int nFailedBS = 0;
     const int nBins = hFake->GetNbinsX();
 
-    std::cout << "Running " << nToys << " BOOTSTRAP toys (Poisson per bin)...\n";
+    std::cout << "Running " << nToys << " BOOTSTRAP toys (Poisson per bin) with MINOS...\n";
 
     for (int t = 0; t < nToys; t++)
     {
@@ -455,15 +624,24 @@ void testFitMomdis()
         }
         FitGlobals::gExp = hFakeToy;
 
-        FitResultN r = doFitN(nominal.N, nominal.phi, false);
+        FitResultN r = doFitN(nominal.N, nominal.phi,
+                              /*verbose*/ false, /*runMinos*/ true);
         if (!r.converged)
         {
             nFailedBS++;
             continue;
         }
         v_N_bs.push_back(r.N);
+        v_chi2_bs.push_back(r.chi2);
+        v_ndf_bs.push_back(r.ndf);
+        v_N_eplus_bs.push_back(r.N_eplus);
+        v_N_eminus_bs.push_back(r.N_eminus);
         for (int k = 0; k < nC; k++)
+        {
             v_phi_bs[k].push_back(r.phi[k]);
+            v_phi_eplus_bs[k].push_back(r.phi_eplus[k]);
+            v_phi_eminus_bs[k].push_back(r.phi_eminus[k]);
+        }
 
         if ((t + 1) % 100 == 0)
             std::cout << "  bootstrap toy " << t + 1 << "/" << nToys << "\n";
@@ -479,13 +657,28 @@ void testFitMomdis()
 
     std::vector<std::vector<double>> v_phi_mc(nC);
     std::vector<double> v_N_mc;
+    std::vector<double> v_chi2_mc;
+    std::vector<int> v_ndf_mc;
+    std::vector<std::vector<double>> v_phi_eplus_mc(nC);
+    std::vector<std::vector<double>> v_phi_eminus_mc(nC);
+    std::vector<double> v_N_eplus_mc;
+    std::vector<double> v_N_eminus_mc;
+
     v_N_mc.reserve(nToys);
+    v_chi2_mc.reserve(nToys);
+    v_ndf_mc.reserve(nToys);
+    v_N_eplus_mc.reserve(nToys);
+    v_N_eminus_mc.reserve(nToys);
     for (int k = 0; k < nC; k++)
+    {
         v_phi_mc[k].reserve(nToys);
+        v_phi_eplus_mc[k].reserve(nToys);
+        v_phi_eminus_mc[k].reserve(nToys);
+    }
 
     int nFailedMC = 0;
 
-    std::cout << "Running " << nToys << " TOY-MC toys (event-by-event from truth)...\n";
+    std::cout << "Running " << nToys << " TOY-MC toys (event-by-event from truth) with MINOS...\n";
 
     for (int t = 0; t < nToys; t++)
     {
@@ -495,7 +688,8 @@ void testFitMomdis()
         FitGlobals::gExp = hToy;
 
         const double Ninit = (hToy->Integral() > 0) ? hToy->Integral() : N_true;
-        FitResultN r = doFitN(Ninit, nominal.phi, false);
+        FitResultN r = doFitN(Ninit, nominal.phi,
+                              /*verbose*/ false, /*runMinos*/ true);
 
         if (!r.converged)
         {
@@ -505,8 +699,16 @@ void testFitMomdis()
         }
 
         v_N_mc.push_back(r.N);
+        v_chi2_mc.push_back(r.chi2);
+        v_ndf_mc.push_back(r.ndf);
+        v_N_eplus_mc.push_back(r.N_eplus);
+        v_N_eminus_mc.push_back(r.N_eminus);
         for (int k = 0; k < nC; k++)
+        {
             v_phi_mc[k].push_back(r.phi[k]);
+            v_phi_eplus_mc[k].push_back(r.phi_eplus[k]);
+            v_phi_eminus_mc[k].push_back(r.phi_eminus[k]);
+        }
 
         delete hToy;
 
@@ -586,6 +788,71 @@ void testFitMomdis()
                   << fmt((s1 > 0) ? s2 / s1 : 0.0) << "\n";
     }
     std::cout << "===========================================\n\n";
+
+    // -------------------------------------------------------------------------
+    // Comparison: spread of the toy distribution vs MEAN MINOS error
+    // (faithfulness of MINOS as a per-fit error estimate).
+    // ratio sigma_toys / <minos> ~ 1  -> MINOS errors are correctly sized.
+    // -------------------------------------------------------------------------
+    auto meanOf = [](const std::vector<double> &v)
+    {
+        if (v.empty())
+            return 0.0;
+        double s = 0.0;
+        for (double x : v)
+            s += x;
+        return s / v.size();
+    };
+
+    std::cout << "=== MINOS errors vs toy spread ===\n";
+    std::cout << "                <e+ MINOS>   <e- MINOS>   sigma(toys)   ratio sig/<e_avg>\n";
+    {
+        const double eP = meanOf(v_N_eplus_bs);
+        const double eM = meanOf(v_N_eminus_bs);
+        const double eAvg = 0.5 * (eP + eM);
+        std::cout << "[BS] N      :  " << std::setw(10) << fmt(eP)
+                  << "   " << std::setw(10) << fmt(eM)
+                  << "   " << std::setw(10) << fmt(sigN_bs)
+                  << "   " << std::setw(10)
+                  << fmt(eAvg > 0 ? sigN_bs / eAvg : 0.0) << "\n";
+    }
+    for (int k = 0; k < nC; k++)
+    {
+        auto [m, s, p16, p50, p84] = toyStats(v_phi_bs[k]);
+        const double eP = meanOf(v_phi_eplus_bs[k]);
+        const double eM = meanOf(v_phi_eminus_bs[k]);
+        const double eAvg = 0.5 * (eP + eM);
+        std::cout << "[BS] phi(" << labels[k] << "):  "
+                  << std::setw(10) << fmt(eP)
+                  << "   " << std::setw(10) << fmt(eM)
+                  << "   " << std::setw(10) << fmt(s)
+                  << "   " << std::setw(10)
+                  << fmt(eAvg > 0 ? s / eAvg : 0.0) << "\n";
+    }
+    {
+        const double eP = meanOf(v_N_eplus_mc);
+        const double eM = meanOf(v_N_eminus_mc);
+        const double eAvg = 0.5 * (eP + eM);
+        std::cout << "[MC] N      :  " << std::setw(10) << fmt(eP)
+                  << "   " << std::setw(10) << fmt(eM)
+                  << "   " << std::setw(10) << fmt(sigN_mc)
+                  << "   " << std::setw(10)
+                  << fmt(eAvg > 0 ? sigN_mc / eAvg : 0.0) << "\n";
+    }
+    for (int k = 0; k < nC; k++)
+    {
+        auto [m, s, p16, p50, p84] = toyStats(v_phi_mc[k]);
+        const double eP = meanOf(v_phi_eplus_mc[k]);
+        const double eM = meanOf(v_phi_eminus_mc[k]);
+        const double eAvg = 0.5 * (eP + eM);
+        std::cout << "[MC] phi(" << labels[k] << "):  "
+                  << std::setw(10) << fmt(eP)
+                  << "   " << std::setw(10) << fmt(eM)
+                  << "   " << std::setw(10) << fmt(s)
+                  << "   " << std::setw(10)
+                  << fmt(eAvg > 0 ? s / eAvg : 0.0) << "\n";
+    }
+    std::cout << "===================================\n\n";
 
     // Pulls of the nominal fit against truth
     std::cout << "=== Pulls (nominal - truth) / sigma ===\n";
@@ -748,4 +1015,311 @@ void testFitMomdis()
         lg->AddEntry(lt, "truth", "l");
         lg->Draw();
     }
+
+    // -------------------------------------------------------------------------
+    // ---- Canvas 5: chi2 distribution of the toy fits (BS and MC)
+    // -------------------------------------------------------------------------
+    // Use the median ndf of each population for the reference chi2 PDF.
+    auto medianInt = [](std::vector<int> v) -> int
+    {
+        if (v.empty())
+            return 0;
+        std::sort(v.begin(), v.end());
+        return v[v.size() / 2];
+    };
+    const int ndf_bs = medianInt(v_ndf_bs);
+    const int ndf_mc = medianInt(v_ndf_mc);
+
+    // Histogram range chosen with a sensible upper edge
+    double chi2_max = 0.0;
+    for (double x : v_chi2_bs)
+        if (x > chi2_max)
+            chi2_max = x;
+    for (double x : v_chi2_mc)
+        if (x > chi2_max)
+            chi2_max = x;
+    if (chi2_max <= 0)
+        chi2_max = 2.0 * std::max(ndf_bs, ndf_mc);
+    chi2_max *= 1.05;
+
+    const int nBinsChi2 = 60;
+
+    TH1F *hChi2BS = new TH1F("hChi2BS",
+                             "Bootstrap #chi^{2};#chi^{2};toys",
+                             nBinsChi2, 0.0, chi2_max);
+    TH1F *hChi2MC = new TH1F("hChi2MC",
+                             "Toy-MC #chi^{2};#chi^{2};toys",
+                             nBinsChi2, 0.0, chi2_max);
+    for (double x : v_chi2_bs)
+        hChi2BS->Fill(x);
+    for (double x : v_chi2_mc)
+        hChi2MC->Fill(x);
+
+    TCanvas *c5 = new TCanvas("c5", "Chi2 distributions", 1000, 450);
+    c5->Divide(2, 1);
+
+    // ---- left pad: chi2
+    c5->cd(1);
+    TH1F *hChi2BSn = (TH1F *)hChi2BS->Clone("hChi2BSn");
+    TH1F *hChi2MCn = (TH1F *)hChi2MC->Clone("hChi2MCn");
+    if (hChi2BSn->Integral() > 0)
+        hChi2BSn->Scale(1.0 / hChi2BSn->Integral("width"));
+    if (hChi2MCn->Integral() > 0)
+        hChi2MCn->Scale(1.0 / hChi2MCn->Integral("width"));
+
+    hChi2BSn->SetLineColor(kBlack);
+    hChi2BSn->SetFillColorAlpha(kGray, 0.4);
+    hChi2BSn->SetLineWidth(2);
+    hChi2MCn->SetLineColor(kBlue + 1);
+    hChi2MCn->SetFillColorAlpha(kBlue, 0.25);
+    hChi2MCn->SetLineWidth(2);
+
+    const double ymax5 = 1.3 * std::max(hChi2BSn->GetMaximum(), hChi2MCn->GetMaximum());
+    hChi2BSn->SetMaximum(ymax5);
+    hChi2BSn->SetTitle("#chi^{2} of toy fits");
+    hChi2BSn->GetXaxis()->SetTitle("#chi^{2}");
+    hChi2BSn->GetYaxis()->SetTitle("normalised toys / unit #chi^{2}");
+    hChi2BSn->Draw("hist");
+    hChi2MCn->Draw("hist same");
+
+    // Reference chi2 pdf for the median ndf (use BS ndf)
+    TF1 *fChi2 = new TF1("fChi2",
+                         "ROOT::Math::chisquared_pdf(x,[0])",
+                         0.0, chi2_max);
+    fChi2->SetParameter(0, ndf_bs);
+    fChi2->SetLineColor(kRed);
+    fChi2->SetLineWidth(2);
+    fChi2->Draw("same");
+
+    auto *leg5a = new TLegend(0.55, 0.65, 0.89, 0.89);
+    leg5a->AddEntry(hChi2BSn, "Bootstrap", "f");
+    leg5a->AddEntry(hChi2MCn, "Toy-MC", "f");
+    leg5a->AddEntry(fChi2, Form("#chi^{2} pdf, ndf=%d", ndf_bs), "l");
+    leg5a->Draw();
+
+    // ---- right pad: chi2 / ndf  (better for visual comparison)
+    c5->cd(2);
+    const double rmax = chi2_max / std::max(1, std::min(ndf_bs, ndf_mc));
+    TH1F *hRedBS = new TH1F("hRedBS",
+                            "Reduced #chi^{2};#chi^{2}/ndf;toys",
+                            nBinsChi2, 0.0, rmax);
+    TH1F *hRedMC = new TH1F("hRedMC",
+                            "Reduced #chi^{2};#chi^{2}/ndf;toys",
+                            nBinsChi2, 0.0, rmax);
+    for (size_t i = 0; i < v_chi2_bs.size(); i++)
+        if (v_ndf_bs[i] > 0)
+            hRedBS->Fill(v_chi2_bs[i] / v_ndf_bs[i]);
+    for (size_t i = 0; i < v_chi2_mc.size(); i++)
+        if (v_ndf_mc[i] > 0)
+            hRedMC->Fill(v_chi2_mc[i] / v_ndf_mc[i]);
+
+    if (hRedBS->Integral() > 0)
+        hRedBS->Scale(1.0 / hRedBS->Integral("width"));
+    if (hRedMC->Integral() > 0)
+        hRedMC->Scale(1.0 / hRedMC->Integral("width"));
+
+    hRedBS->SetLineColor(kBlack);
+    hRedBS->SetFillColorAlpha(kGray, 0.4);
+    hRedBS->SetLineWidth(2);
+    hRedMC->SetLineColor(kBlue + 1);
+    hRedMC->SetFillColorAlpha(kBlue, 0.25);
+    hRedMC->SetLineWidth(2);
+
+    const double ymax5b = 1.3 * std::max(hRedBS->GetMaximum(), hRedMC->GetMaximum());
+    hRedBS->SetMaximum(ymax5b);
+    hRedBS->SetTitle("Reduced #chi^{2} of toy fits");
+    hRedBS->GetXaxis()->SetTitle("#chi^{2} / ndf");
+    hRedBS->GetYaxis()->SetTitle("normalised toys");
+    hRedBS->Draw("hist");
+    hRedMC->Draw("hist same");
+
+    TLine *l1 = new TLine(1.0, 0.0, 1.0, ymax5b);
+    l1->SetLineColor(kRed);
+    l1->SetLineStyle(2);
+    l1->SetLineWidth(2);
+    l1->Draw();
+
+    auto *leg5b = new TLegend(0.55, 0.70, 0.89, 0.89);
+    leg5b->AddEntry(hRedBS, "Bootstrap", "f");
+    leg5b->AddEntry(hRedMC, "Toy-MC", "f");
+    leg5b->AddEntry(l1, "expected = 1", "l");
+    leg5b->Draw();
+
+    // Print mean reduced chi2 to stdout
+    double meanRedBS = 0.0, meanRedMC = 0.0;
+    int nRedBS = 0, nRedMC = 0;
+    for (size_t i = 0; i < v_chi2_bs.size(); i++)
+        if (v_ndf_bs[i] > 0)
+        {
+            meanRedBS += v_chi2_bs[i] / v_ndf_bs[i];
+            nRedBS++;
+        }
+    for (size_t i = 0; i < v_chi2_mc.size(); i++)
+        if (v_ndf_mc[i] > 0)
+        {
+            meanRedMC += v_chi2_mc[i] / v_ndf_mc[i];
+            nRedMC++;
+        }
+    if (nRedBS)
+        meanRedBS /= nRedBS;
+    if (nRedMC)
+        meanRedMC /= nRedMC;
+    std::cout << "=== chi2 summary ===\n";
+    std::cout << "Bootstrap: median ndf = " << ndf_bs
+              << "   <chi2/ndf> = " << meanRedBS << "\n";
+    std::cout << "Toy-MC   : median ndf = " << ndf_mc
+              << "   <chi2/ndf> = " << meanRedMC << "\n";
+    std::cout << "====================\n\n";
+
+    // -------------------------------------------------------------------------
+    // ---- Canvas 6 & 7: MINOS error distributions for each fraction (and N)
+    //   Vertical reference lines:
+    //     - red dashed   = sigma of the toy distribution (gold-standard)
+    //     - dark green   = mean MINOS error
+    // -------------------------------------------------------------------------
+    auto buildErrorHists = [&](const std::vector<std::vector<double>> &ePlus,
+                               const std::vector<std::vector<double>> &eMinus,
+                               const std::vector<double> &eNplus,
+                               const std::vector<double> &eNminus,
+                               const std::vector<std::vector<double>> &v_phi,
+                               const std::vector<double> &v_N,
+                               const std::string &tag,
+                               int colorTag) -> TCanvas *
+    {
+        TCanvas *cc = new TCanvas(Form("cMinos_%s", tag.c_str()),
+                                  Form("MINOS errors %s", tag.c_str()),
+                                  300 * (nC + 1), 350);
+        cc->Divide(nC + 1, 1);
+
+        // ---- N
+        cc->cd(1);
+        double xmaxN = 0.0;
+        for (double x : eNplus)
+            if (x > xmaxN)
+                xmaxN = x;
+        for (double x : eNminus)
+            if (x > xmaxN)
+                xmaxN = x;
+        if (xmaxN <= 0)
+            xmaxN = 1.0;
+        xmaxN *= 1.2;
+
+        TH1F *hEpN = new TH1F(Form("hEpN_%s", tag.c_str()),
+                              Form("MINOS error N (%s);MINOS error;toys", tag.c_str()),
+                              60, 0.0, xmaxN);
+        TH1F *hEmN = new TH1F(Form("hEmN_%s", tag.c_str()),
+                              "", 60, 0.0, xmaxN);
+        for (double x : eNplus)
+            hEpN->Fill(x);
+        for (double x : eNminus)
+            hEmN->Fill(x);
+
+        hEpN->SetLineColor(colorTag);
+        hEpN->SetFillColorAlpha(colorTag, 0.30);
+        hEpN->SetLineWidth(2);
+        hEmN->SetLineColor(colorTag + 2);
+        hEmN->SetLineStyle(2);
+        hEmN->SetLineWidth(2);
+
+        const double ymN = 1.25 * std::max(hEpN->GetMaximum(), hEmN->GetMaximum());
+        hEpN->SetMaximum(ymN);
+        hEpN->Draw("hist");
+        hEmN->Draw("hist same");
+
+        // toy spread reference
+        auto [mN, sN, p16N, p50N, p84N] = toyStats(v_N);
+        TLine *lToyN = new TLine(sN, 0, sN, ymN);
+        lToyN->SetLineColor(kRed);
+        lToyN->SetLineStyle(2);
+        lToyN->SetLineWidth(2);
+        lToyN->Draw();
+
+        const double meanEpN = meanOf(eNplus);
+        TLine *lMeanN = new TLine(meanEpN, 0, meanEpN, ymN);
+        lMeanN->SetLineColor(kGreen + 3);
+        lMeanN->SetLineStyle(1);
+        lMeanN->SetLineWidth(2);
+        lMeanN->Draw();
+
+        auto *legN = new TLegend(0.45, 0.65, 0.89, 0.89);
+        legN->AddEntry(hEpN, "MINOS e+", "f");
+        legN->AddEntry(hEmN, "MINOS e-", "l");
+        legN->AddEntry(lToyN, Form("#sigma(toys) = %.2f", sN), "l");
+        legN->AddEntry(lMeanN, Form("<e+> = %.2f", meanEpN), "l");
+        legN->Draw();
+
+        // ---- per fraction
+        for (int k = 0; k < nC; k++)
+        {
+            cc->cd(k + 2);
+
+            double xmax = 0.0;
+            for (double x : ePlus[k])
+                if (x > xmax)
+                    xmax = x;
+            for (double x : eMinus[k])
+                if (x > xmax)
+                    xmax = x;
+            if (xmax <= 0)
+                xmax = 0.05;
+            xmax *= 1.2;
+
+            TH1F *hEp = new TH1F(Form("hEp_%s_%d", tag.c_str(), k),
+                                 Form("MINOS error #phi(%s) [%s];MINOS error;toys",
+                                      labels[k].c_str(), tag.c_str()),
+                                 60, 0.0, xmax);
+            TH1F *hEm = new TH1F(Form("hEm_%s_%d", tag.c_str(), k),
+                                 "", 60, 0.0, xmax);
+            for (double x : ePlus[k])
+                hEp->Fill(x);
+            for (double x : eMinus[k])
+                hEm->Fill(x);
+
+            hEp->SetLineColor(colors[k]);
+            hEp->SetFillColorAlpha(colors[k], 0.30);
+            hEp->SetLineWidth(2);
+            hEm->SetLineColor(colors[k] + 2);
+            hEm->SetLineStyle(2);
+            hEm->SetLineWidth(2);
+
+            const double ym = 1.25 * std::max(hEp->GetMaximum(), hEm->GetMaximum());
+            hEp->SetMaximum(ym);
+            hEp->Draw("hist");
+            hEm->Draw("hist same");
+
+            auto [mP, sP, p16P, p50P, p84P] = toyStats(v_phi[k]);
+            TLine *lToy = new TLine(sP, 0, sP, ym);
+            lToy->SetLineColor(kRed);
+            lToy->SetLineStyle(2);
+            lToy->SetLineWidth(2);
+            lToy->Draw();
+
+            const double meanEp = meanOf(ePlus[k]);
+            TLine *lMean = new TLine(meanEp, 0, meanEp, ym);
+            lMean->SetLineColor(kGreen + 3);
+            lMean->SetLineStyle(1);
+            lMean->SetLineWidth(2);
+            lMean->Draw();
+
+            auto *lg = new TLegend(0.40, 0.65, 0.89, 0.89);
+            lg->AddEntry(hEp, "MINOS e+", "f");
+            lg->AddEntry(hEm, "MINOS e-", "l");
+            lg->AddEntry(lToy, Form("#sigma(toys) = %.4f", sP), "l");
+            lg->AddEntry(lMean, Form("<e+> = %.4f", meanEp), "l");
+            lg->Draw();
+        }
+        return cc;
+    };
+
+    TCanvas *c6 = buildErrorHists(v_phi_eplus_bs, v_phi_eminus_bs,
+                                  v_N_eplus_bs, v_N_eminus_bs,
+                                  v_phi_bs, v_N_bs,
+                                  "BS", kBlack);
+    TCanvas *c7 = buildErrorHists(v_phi_eplus_mc, v_phi_eminus_mc,
+                                  v_N_eplus_mc, v_N_eminus_mc,
+                                  v_phi_mc, v_N_mc,
+                                  "MC", kBlue);
+
+    (void)c6;
+    (void)c7; // silence unused warnings if compiled standalone
 }
