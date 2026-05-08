@@ -87,26 +87,6 @@ void DataAnalysis::getData(bool called)
     Double_t beta_proj;
     Double_t px_proj, py_proj, pz_proj;
 
-    // CALIFA angles
-    Double_t califa_theta_L, califa_phi_L, califa_theta_R, califa_phi_R;
-
-    // FOOT charges and positions
-    Double_t foot_z_1, foot_z_2, foot_z_3, foot_z_4;
-    Double_t foot_z_5, foot_z_6, foot_z_7, foot_z_8;
-    Double_t PosFoot5, PosFoot6, PosFoot7, PosFoot8;
-
-    // Fiber detectors
-    Double_t fib30X, fib30Y, ElossFib30;
-    Double_t fib31X, fib31Y, ElossFib31;
-    Double_t fib32X, fib32Y, ElossFib32;
-    Double_t fib33X, fib33Y, ElossFib33;
-
-    // ToFD
-    Double_t tofdX;
-
-    // Outgoing start position
-    Double_t out_startX, out_startY, out_startZ;
-
     t->SetBranchAddress("AoQ_frag", &AoQ_frag);
     t->SetBranchAddress("Z_frag_est", &Z_frag_est);
     t->SetBranchAddress("A_frag", &A_frag);
@@ -121,50 +101,6 @@ void DataAnalysis::getData(bool called)
     t->SetBranchAddress("px_in", &px_proj);
     t->SetBranchAddress("py_in", &py_proj);
     t->SetBranchAddress("pz_in", &pz_proj);
-
-    // CALIFA angles
-    t->SetBranchAddress("califa_theta_L", &califa_theta_L);
-    t->SetBranchAddress("califa_phi_L", &califa_phi_L);
-    t->SetBranchAddress("califa_theta_R", &califa_theta_R);
-    t->SetBranchAddress("califa_phi_R", &califa_phi_R);
-
-    // FOOT charges
-    t->SetBranchAddress("foot_z_1", &foot_z_1);
-    t->SetBranchAddress("foot_z_2", &foot_z_2);
-    t->SetBranchAddress("foot_z_3", &foot_z_3);
-    t->SetBranchAddress("foot_z_4", &foot_z_4);
-    t->SetBranchAddress("foot_z_5", &foot_z_5);
-    t->SetBranchAddress("foot_z_6", &foot_z_6);
-    t->SetBranchAddress("foot_z_7", &foot_z_7);
-    t->SetBranchAddress("foot_z_8", &foot_z_8);
-
-    // FOOT positions
-    t->SetBranchAddress("PosFoot5", &PosFoot5);
-    t->SetBranchAddress("PosFoot6", &PosFoot6);
-    t->SetBranchAddress("PosFoot7", &PosFoot7);
-    t->SetBranchAddress("PosFoot8", &PosFoot8);
-
-    // Fiber detectors
-    t->SetBranchAddress("fib30X", &fib30X);
-    t->SetBranchAddress("fib30Y", &fib30Y);
-    t->SetBranchAddress("ElossFib30", &ElossFib30);
-    t->SetBranchAddress("fib31X", &fib31X);
-    t->SetBranchAddress("fib31Y", &fib31Y);
-    t->SetBranchAddress("ElossFib31", &ElossFib31);
-    t->SetBranchAddress("fib32X", &fib32X);
-    t->SetBranchAddress("fib32Y", &fib32Y);
-    t->SetBranchAddress("ElossFib32", &ElossFib32);
-    t->SetBranchAddress("fib33X", &fib33X);
-    t->SetBranchAddress("fib33Y", &fib33Y);
-    t->SetBranchAddress("ElossFib33", &ElossFib33);
-
-    // ToFD
-    t->SetBranchAddress("tofdX", &tofdX);
-
-    // Outgoing start position
-    t->SetBranchAddress("out_startX", &out_startX);
-    t->SetBranchAddress("out_startY", &out_startY);
-    t->SetBranchAddress("out_startZ", &out_startZ);
 
     if (fHasNeutrons)
     {
@@ -206,7 +142,6 @@ void DataAnalysis::getData(bool called)
     Double_t px_sys_CM, py_sys_CM, pz_sys_CM;
     Double_t opa_lab;
     Double_t px_rf_rot, py_rf_rot, pz_rf_rot;
-    Double_t AoQ_matched;
 
     if (called)
     {
@@ -233,50 +168,6 @@ void DataAnalysis::getData(bool called)
         tout->Branch("px_rf_rot", &px_rf_rot);
         tout->Branch("py_rf_rot", &py_rf_rot);
         tout->Branch("pz_rf_rot", &pz_rf_rot);
-
-        // CALIFA angles
-        tout->Branch("califa_theta_L", &califa_theta_L);
-        tout->Branch("califa_phi_L", &califa_phi_L);
-        tout->Branch("califa_theta_R", &califa_theta_R);
-        tout->Branch("califa_phi_R", &califa_phi_R);
-
-        // FOOT charges
-        tout->Branch("foot_z_1", &foot_z_1);
-        tout->Branch("foot_z_2", &foot_z_2);
-        tout->Branch("foot_z_3", &foot_z_3);
-        tout->Branch("foot_z_4", &foot_z_4);
-        tout->Branch("foot_z_5", &foot_z_5);
-        tout->Branch("foot_z_6", &foot_z_6);
-        tout->Branch("foot_z_7", &foot_z_7);
-        tout->Branch("foot_z_8", &foot_z_8);
-
-        // FOOT positions
-        tout->Branch("PosFoot5", &PosFoot5);
-        tout->Branch("PosFoot6", &PosFoot6);
-        tout->Branch("PosFoot7", &PosFoot7);
-        tout->Branch("PosFoot8", &PosFoot8);
-
-        // Fiber detectors
-        tout->Branch("fib30X", &fib30X);
-        tout->Branch("fib30Y", &fib30Y);
-        tout->Branch("ElossFib30", &ElossFib30);
-        tout->Branch("fib31X", &fib31X);
-        tout->Branch("fib31Y", &fib31Y);
-        tout->Branch("ElossFib31", &ElossFib31);
-        tout->Branch("fib32X", &fib32X);
-        tout->Branch("fib32Y", &fib32Y);
-        tout->Branch("ElossFib32", &ElossFib32);
-        tout->Branch("fib33X", &fib33X);
-        tout->Branch("fib33Y", &fib33Y);
-        tout->Branch("ElossFib33", &ElossFib33);
-
-        // ToFD
-        tout->Branch("tofdX", &tofdX);
-
-        // Outgoing start position
-        tout->Branch("out_startX", &out_startX);
-        tout->Branch("out_startY", &out_startY);
-        tout->Branch("out_startZ", &out_startZ);
 
         if (fHasNeutrons)
         {
@@ -338,7 +229,6 @@ void DataAnalysis::getData(bool called)
             Double_t gamma_frag = 1.0 / std::sqrt(1.0 - beta_frag * beta_frag);
 
             // Double_t m_f = M_frag * 1000.;
-
 
             Double_t m_f = M_frag;
 
@@ -441,8 +331,7 @@ void DataAnalysis::getData(bool called)
         TLorentzVector P4_proj_rot = RotateP4(P4_proj_lab);
 
         TLorentzVector P4_sys_CM = P4_sys_rot;
-        // P4_sys_CM.Boost(TVector3(0.0, 0.0, -beta_proj)); // boost opposite to +Z
-        P4_sys_CM.Boost(-P4_proj_rot.BoostVector()); // boost opposite to +Z
+        P4_sys_CM.Boost(TVector3(0.0, 0.0, -beta_proj)); // boost opposite to +Z
 
         px_sys = P4_sys_lab.Px();
         py_sys = P4_sys_lab.Py();
