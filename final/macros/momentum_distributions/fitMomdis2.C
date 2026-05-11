@@ -11,6 +11,24 @@
 #include <RooChi2Var.h>
 #include <TRandom3.h>
 
+// =============================================================================
+// fitMomdis_extended.C — same as fitMomdis.C but with EXTENDED likelihood.
+//
+// Differences vs the recursive version:
+//   - The model is RooAddPdf with N free yields c_k (one per component),
+//     c_k >= 0 (we allow a small negative range so MINOS can build the lower
+//     contour when a component is at the physical boundary).
+//   - The fit is extended (Extended(true)): N is a fit parameter.
+//     N_total is derived as Ntot = sum(c_k) (RooFormulaVar).
+//   - Physical fractions phi_k = c_k / sum(c_j), also as RooFormulaVar.
+//   - Errors on N and phi_k are obtained via getPropagatedError, which uses
+//     the FULL covariance matrix (so the strong negative correlations
+//     between yields are accounted for properly).
+//
+// Everything else (input reading, offset subtraction, Erel/opa cuts, residual
+// pulls, py refit, plots) is identical to the recursive version.
+// =============================================================================
+
 struct MomentaDist
 {
     TH1F *Qz = nullptr;
@@ -50,10 +68,7 @@ MomentaDist getMomentaDistFromtxt(std::string txtFile, std::string histName)
 }
 
 // ---------------------------------------------------------------------------
-// Read px_rf_rot from the experimental tree.
-// erelMin, erelMax: cuts on Erel (in MeV, applied as Erel*1000 from the tree
-//                   which stores it in GeV — keep the original convention).
-//                   Set BOTH to -1 to disable the Erel cut entirely.
+// Read px_rf_rot from the experimental tree (identical to recursive version)
 // ---------------------------------------------------------------------------
 TH1F *getMomentaDistFromRoot(std::string rootFile, bool useErelCut,
                              double erelMin = 0.2, double erelMax = 1.,
@@ -78,8 +93,8 @@ TH1F *getMomentaDistFromRoot(std::string rootFile, bool useErelCut,
     Long64_t n = 0;
     const Long64_t nEntries = tr->GetEntries();
 
-    double opamin = 1.3; // 1.25
-    double opamax = 1.6; // 1.65
+    double opamin = 1.3;
+    double opamax = 1.6;
 
     for (Long64_t i = 0; i < nEntries; ++i)
     {
@@ -148,58 +163,16 @@ TH1F *buildTemplate(TH1F *hTheo, TH1F *hExp, std::string name)
     return hOut;
 }
 
-// Small helper to compute summary stats of a bootstrap sample
-std::tuple<double, double, double, double, double> toyStats(std::vector<double> v)
-{
-    std::sort(v.begin(), v.end());
-    const int n = v.size();
-    double mean = 0.0;
-    for (double x : v)
-        mean += x;
-    mean /= n;
-    double var = 0.0;
-    for (double x : v)
-        var += (x - mean) * (x - mean);
-    const double sigma = std::sqrt(var / (n - 1));
-    const double p16 = v[(int)(0.16 * n)];
-    const double p50 = v[(int)(0.50 * n)];
-    const double p84 = v[(int)(0.84 * n)];
-    return std::make_tuple(mean, sigma, p16, p50, p84);
-}
-
-// ---------------------------------------------------------------------------
-// Convert recursive fractions (a_0, a_1, ..., a_{N-2}) into physical fractions
-// (phi_0, ..., phi_{N-1}) following the RooAddPdf recursive convention:
-//
-//   phi_0     = a_0
-//   phi_1     = (1 - a_0) * a_1
-//   phi_2     = (1 - a_0) * (1 - a_1) * a_2
-//   ...
-//   phi_{N-1} = (1 - a_0) * (1 - a_1) * ... * (1 - a_{N-2})
-// ---------------------------------------------------------------------------
-std::vector<double> recursiveToPhysical(const std::vector<double> &a)
-{
-    const int N = (int)a.size() + 1;
-    std::vector<double> phi(N);
-    double remain = 1.0;
-    for (int k = 0; k < N - 1; k++)
-    {
-        phi[k] = remain * a[k];
-        remain *= (1.0 - a[k]);
-    }
-    phi[N - 1] = remain;
-    return phi;
-}
-
-// void fitMomdis(double erelMin = 2.2, double erelMax = 4)
-void fitMomdis(double erelMin = 4, double erelMax = 7.5)
+// =============================================================================
+// MAIN
+// =============================================================================
+void fitMomdis2(double erelMin = 1.5, double erelMax = 4)
 {
     using namespace RooFit;
-
     RooMsgService::instance().setGlobalKillBelow(RooFit::WARNING);
 
     // =====================================================================
-    // Inputs — reduce inFilesTheo to a single entry for a single-component fit
+    // Inputs
     // =====================================================================
     std::vector<std::string> inFilesTheo = {
         "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_d52-gs.txt",
@@ -212,9 +185,14 @@ void fitMomdis(double erelMin = 4, double erelMax = 7.5)
     std::string inFileExp = "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/23O_analyzed_test.root";
 
     const int nC = (int)inFilesTheo.size();
+    if ((int)labels.size() != nC)
+    {
+        std::cerr << "ERROR: labels.size() != inFilesTheo.size() ("
+                  << labels.size() << " vs " << nC << ")\n";
+        return;
+    }
     const bool useErelCut = !(erelMin < 0 && erelMax < 0);
 
-    // Read experimental histogram and build templates in the same binning
     auto *h_exp = getMomentaDistFromRoot(inFileExp, useErelCut, erelMin, erelMax);
 
     std::vector<TH1F *> templates(nC);
@@ -225,13 +203,19 @@ void fitMomdis(double erelMin = 4, double erelMax = 7.5)
     }
 
     // =====================================================================
-    // Build the RooFit model
+    // Build the EXTENDED RooFit model
     //
-    // nC == 1: fitModel = single RooHistPdf, no free fraction parameters.
-    // nC  > 1: fitModel = RooAddPdf with recursive fractions (original logic).
+    // c_k : free yield for component k, range [-0.05*Ntot, 10*Ntot].
+    //       Slight negative lower bound so MINOS can find the lower contour
+    //       for components at the physical boundary (truth ~ 0).
+    // model = RooAddPdf(pdfList, yieldList) — extended automatically when
+    //         #coeffs == #pdfs.
+    // Ntot  : RooFormulaVar = sum(c_k).
+    // phi_k : RooFormulaVar = c_k / Ntot.
     // =====================================================================
     const double xmin = h_exp->GetXaxis()->GetXmin();
     const double xmax = h_exp->GetXaxis()->GetXmax();
+    const double Nseed = std::max(1.0, h_exp->Integral());
 
     RooRealVar x("x", "p_{x} [MeV/c]", xmin, xmax);
 
@@ -245,96 +229,96 @@ void fitMomdis(double erelMin = 4, double erelMax = 7.5)
                                      RooArgSet(x), *dh_tmpl[k], 0);
     }
 
-    // Recursive fractions and composite model (only built when nC > 1)
-    std::vector<RooRealVar *> a(nC > 1 ? nC - 1 : 0, nullptr);
-    RooArgList fracList, pdfList;
+    RooArgList pdfList;
     for (int k = 0; k < nC; k++)
         pdfList.add(*pdf_tmpl[k]);
 
-    RooAddPdf *model = nullptr;    // non-null only when nC > 1
-    RooAbsPdf *fitModel = nullptr; // always set below
-
-    if (nC > 1)
+    // Free yields
+    std::vector<RooRealVar *> c(nC, nullptr);
+    RooArgList yieldList;
+    for (int k = 0; k < nC; k++)
     {
-        for (int k = 0; k < nC - 1; k++)
-        {
-            const double init = 1.0 / (nC - k);
-            a[k] = new RooRealVar(Form("a%d", k), Form("recursive frac a_%d", k), init, 0.0, 1.0);
-            fracList.add(*a[k]);
-        }
-        model = new RooAddPdf("model", "sum of templates", pdfList, fracList, /*recursiveFractions=*/true);
-        fitModel = model;
-    }
-    else
-    {
-        fitModel = pdf_tmpl[0];
+        const double init = Nseed / nC;
+        c[k] = new RooRealVar(Form("c%d", k),
+                              Form("yield %s", labels[k].c_str()),
+                              init, 0., 10.0 * Nseed);
+        yieldList.add(*c[k]);
     }
 
-    // Physical fraction formulas — propagate covariance (only needed when nC > 1)
-    std::vector<RooFormulaVar *> phi(nC > 1 ? nC : 0, nullptr);
-    if (nC > 1)
+    RooAddPdf *model = new RooAddPdf("model", "extended sum of templates",
+                                     pdfList, yieldList);
+    RooAbsPdf *fitModel = model;
+
+    // Total yield Ntot = sum(c_k)
+    RooFormulaVar *Ntot_fv = nullptr;
     {
+        std::string sumExpr;
+        RooArgList sumDeps;
         for (int k = 0; k < nC; k++)
         {
-            std::string expr;
-            RooArgList deps;
-            if (k < nC - 1)
-            {
-                // phi_k = (1-a_0)*...*(1-a_{k-1}) * a_k
-                for (int j = 0; j < k; j++)
-                {
-                    expr += Form("(1-@%d)*", j);
-                    deps.add(*a[j]);
-                }
-                expr += Form("@%d", k);
-                deps.add(*a[k]);
-            }
-            else
-            {
-                // phi_{N-1} = prod_{j=0}^{N-2} (1-a_j)
-                for (int j = 0; j < nC - 1; j++)
-                {
-                    if (j > 0)
-                        expr += "*";
-                    expr += Form("(1-@%d)", j);
-                    deps.add(*a[j]);
-                }
-            }
-            phi[k] = new RooFormulaVar(Form("phi_%d", k),
-                                       Form("physical fraction %s", labels[k].c_str()),
-                                       expr.c_str(), deps);
+            if (k > 0)
+                sumExpr += "+";
+            sumExpr += Form("@%d", k);
+            sumDeps.add(*c[k]);
         }
+        Ntot_fv = new RooFormulaVar("Ntot", "total yield",
+                                    sumExpr.c_str(), sumDeps);
+    }
+
+    // Physical fractions phi_k = c_k / sum(c_j)
+    std::vector<RooFormulaVar *> phi(nC, nullptr);
+    for (int k = 0; k < nC; k++)
+    {
+        std::string num = Form("@%d", k);
+        std::string den;
+        RooArgList deps;
+        for (int j = 0; j < nC; j++)
+        {
+            if (j > 0)
+                den += "+";
+            den += Form("@%d", j);
+            deps.add(*c[j]);
+        }
+        const std::string expr = num + "/(" + den + ")";
+        phi[k] = new RooFormulaVar(Form("phi_%d", k),
+                                   Form("physical fraction %s", labels[k].c_str()),
+                                   expr.c_str(), deps);
     }
 
     // =====================================================================
-    // Nominal fit on real data
+    // Nominal fit on real data (px)
     // =====================================================================
     RooDataHist data("data", "experimental data", RooArgList(x), h_exp);
 
-    // nC == 1: no free parameters, nothing to minimize — skip fitTo
-    std::unique_ptr<RooFitResult> fitRes;
-    if (nC > 1)
-        fitRes.reset(fitModel->fitTo(data, Save(true), PrintLevel(-1), Minos(true)));
+    std::unique_ptr<RooFitResult> fitRes(
+        fitModel->fitTo(data,
+                        Extended(true),
+                        Save(true),
+                        PrintLevel(-1),
+                        Minos(true)));
 
-    // Physical fractions: trivially 1.0 when nC == 1
-    std::vector<double> frac_nom(nC, 1.0);
+    std::vector<double> frac_nom(nC, 0.0);
     std::vector<double> frac_err(nC, 0.0);
-    if (nC > 1)
-        for (int k = 0; k < nC; k++)
-        {
-            frac_nom[k] = phi[k]->getVal();
-            frac_err[k] = phi[k]->getPropagatedError(*fitRes);
-        }
-
-    const double Ntot = h_exp->Integral();
-
-    std::cout << "\n=== Nominal RooFit result ===\n";
-    std::cout << "N (data) = " << Ntot << "\n";
-    if (nC > 1)
+    for (int k = 0; k < nC; k++)
     {
-        for (int k = 0; k < nC - 1; k++)
-            std::cout << "a_" << k << " = " << a[k]->getVal() << " +/- " << a[k]->getError() << "\n";
+        frac_nom[k] = phi[k]->getVal();
+        frac_err[k] = (fitRes ? phi[k]->getPropagatedError(*fitRes) : 0.0);
     }
+
+    const double Nfit = Ntot_fv->getVal();
+    const double Nfit_err = (fitRes ? Ntot_fv->getPropagatedError(*fitRes) : 0.0);
+    const double Ndata = h_exp->Integral();
+
+    std::cout << "\n=== Nominal RooFit result (extended ML, px) ===\n";
+    std::cout << "N (data)  = " << Ndata << "\n";
+    std::cout << "N (fit)   = " << Nfit << "  +/- " << Nfit_err << "\n";
+    std::cout << "--- yields ---\n";
+    for (int k = 0; k < nC; k++)
+        std::cout << "c_" << k << " (" << labels[k] << ") = "
+                  << c[k]->getVal()
+                  << "  +/- " << c[k]->getError()
+                  << "  (MINOS +" << c[k]->getAsymErrorHi()
+                  << " / " << c[k]->getAsymErrorLo() << ")\n";
     std::cout << "--- physical fractions ---\n";
     for (int k = 0; k < nC; k++)
         std::cout << "phi(" << labels[k] << ") = " << frac_nom[k]
@@ -346,18 +330,11 @@ void fitMomdis(double erelMin = 4, double erelMax = 7.5)
 
     // ---------------------------------------------------------------------
     // chi2 manual:  sum_i (N_obs_i - N_exp_i)^2 / N_exp_i
-    // Bins with N_exp <= 0 are skipped.
-    //
-    // Degrees of freedom:
-    //   ndf = N_bins_used - nC
-    // The fit has (nC - 1) free fraction parameters, plus 1 implicit
-    // constraint from fixing the total normalization to the data
-    // (N_exp_i is built as Ntot * pdf_int, so sum_i N_exp_i = sum_i N_obs_i
-    // is enforced by construction, consuming one extra degree of freedom).
-    // For nC == 1 this gives ndf = N_bins_used - 1, consistent with the
-    // single-component case where only the global normalization is fixed.
+    // For an extended model, N_exp_i = N_fit * pdf_int(bin), where N_fit is
+    // the total yield from the fit (NOT the data integral). With Extended,
+    // sum_i N_exp_i is itself a fit result, not a constraint, so:
+    //   ndf = N_bins_used - nC          (nC free yields, no extra constraint)
     // ---------------------------------------------------------------------
-    const double Ntot_for_chi2 = h_exp->Integral();
     double chi2 = 0.0;
     int nBinsUsed = 0;
     for (int i = 1; i <= h_exp->GetNbinsX(); i++)
@@ -368,7 +345,7 @@ void fitMomdis(double erelMin = 4, double erelMax = 7.5)
         x.setRange("binChi2", lo, hi);
         RooAbsReal *binInt = fitModel->createIntegral(RooArgSet(x), NormSet(RooArgSet(x)),
                                                       Range("binChi2"));
-        const double Nexp = Ntot_for_chi2 * binInt->getVal();
+        const double Nexp = Nfit * binInt->getVal();
         delete binInt;
 
         if (Nexp <= 0)
@@ -380,24 +357,21 @@ void fitMomdis(double erelMin = 4, double erelMax = 7.5)
         nBinsUsed++;
     }
 
-    const int nPar = (nC > 1) ? nC - 1 : 0; // free parameters in the fit
-    const int ndf = nBinsUsed - nC;         // = nBinsUsed - nPar - 1
+    const int ndf = nBinsUsed - nC;
     std::cout << "chi2 = " << chi2 << "  ndf = " << ndf
-              << "  (= " << nBinsUsed << " bins - " << nPar
-              << " free pars - 1 norm constraint)\n"
+              << "  (= " << nBinsUsed << " bins - " << nC
+              << " free yields)\n"
               << "  chi2/ndf = " << (ndf > 0 ? chi2 / ndf : -1.0) << "\n";
-    std::cout << "=============================\n\n";
+    std::cout << "================================================\n\n";
 
     // =====================================================================
-    // Plots
+    // Plots (px) — same layout as the recursive version
     // =====================================================================
-    TCanvas *c1 = new TCanvas("c1", "RooFit template fit", 800, 800);
+    TCanvas *c1 = new TCanvas("c1", "RooFit template fit (extended)", 800, 800);
 
-    // Top pad: fit
     TPad *padTop = new TPad("padTop", "padTop", 0.0, 0.30, 1.0, 1.0);
     padTop->SetBottomMargin(0.02);
     padTop->Draw();
-    // Bottom pad: residuals (pulls)
     TPad *padBot = new TPad("padBot", "padBot", 0.0, 0.0, 1.0, 0.30);
     padBot->SetTopMargin(0.02);
     padBot->SetBottomMargin(0.32);
@@ -405,58 +379,44 @@ void fitMomdis(double erelMin = 4, double erelMax = 7.5)
 
     padTop->cd();
 
-    RooPlot *xframe = x.frame(Title("Template fit"));
+    RooPlot *xframe = x.frame(Title("Template fit (extended ML)"));
     data.plotOn(xframe, Name("data"));
     fitModel->plotOn(xframe, LineColor(kRed), LineWidth(2), Name("total"));
 
-    // Individual components drawn dashed (only meaningful when nC > 1)
-    if (nC > 1)
-        for (int k = 0; k < nC; k++)
-            model->plotOn(xframe,
-                          Components(*pdf_tmpl[k]),
-                          LineStyle(kDashed),
-                          LineColor(colors[k % colors.size()]),
-                          LineWidth(2),
-                          Name(Form("comp_%d", k)));
+    for (int k = 0; k < nC; k++)
+        model->plotOn(xframe,
+                      Components(*pdf_tmpl[k]),
+                      LineStyle(kDashed),
+                      LineColor(colors[k % colors.size()]),
+                      LineWidth(2),
+                      Name(Form("comp_%d", k)));
 
-    xframe->GetXaxis()->SetLabelSize(0.0); // hide x labels on top pad
+    xframe->GetXaxis()->SetLabelSize(0.0);
     xframe->GetXaxis()->SetTitleSize(0.0);
     xframe->Draw();
 
     auto *leg = new TLegend(0.55, 0.60, 0.89, 0.89);
     leg->AddEntry(xframe->findObject("data"), "Exp", "ep");
-    leg->AddEntry(xframe->findObject("total"), "Fit total", "l");
+    leg->AddEntry(xframe->findObject("total"),
+                  Form("Fit total (N = %.0f #pm %.0f)", Nfit, Nfit_err), "l");
     for (int k = 0; k < nC; k++)
-    {
-        // When nC == 1 there is no separate "comp_0" curve; point the legend at "total"
-        const char *entryName = (nC > 1) ? Form("comp_%d", k) : "total";
-        leg->AddEntry(xframe->findObject(entryName),
+        leg->AddEntry(xframe->findObject(Form("comp_%d", k)),
                       Form("%s (%.1f #pm %.1f)%%",
                            labels[k].c_str(), frac_nom[k] * 100, frac_err[k] * 100),
                       "l");
-    }
     leg->AddEntry((TObject *)nullptr,
                   Form("#chi^{2}/ndf = %.2f/%d = %.2f", chi2, ndf,
                        (ndf > 0 ? chi2 / ndf : -1.0)),
                   "");
     leg->Draw();
 
-    // ---------------------------------------------------------------------
-    // Residual / pull plot:  r_i = (N_obs - N_exp) / sqrt(N_exp)
-    // N_exp is the model PDF integrated over each bin, normalized to Ntot.
-    // Bins with N_exp == 0 are skipped (would divide by zero).
-    // ---------------------------------------------------------------------
+    // Residual plot
     padBot->cd();
 
     TH1F *h_res = new TH1F("h_res", ";p_{x} [MeV/c];(N_{obs} - N_{exp})/#sqrt{N_{exp}}",
                            h_exp->GetNbinsX(),
                            h_exp->GetXaxis()->GetXmin(),
                            h_exp->GetXaxis()->GetXmax());
-
-    // Get N_exp per bin by integrating the pdf bin-by-bin
-    RooAbsReal *modelInt = fitModel->createIntegral(RooArgSet(x), NormSet(RooArgSet(x)));
-    const double normFactor = Ntot; // pdf is normalized to 1 over [xmin, xmax]
-    (void)modelInt;                 // total integral = 1, kept for clarity
 
     double maxAbsR = 0.0;
     for (int i = 1; i <= h_exp->GetNbinsX(); i++)
@@ -467,7 +427,7 @@ void fitMomdis(double erelMin = 4, double erelMax = 7.5)
         x.setRange("binRange", lo, hi);
         RooAbsReal *binInt = fitModel->createIntegral(RooArgSet(x), NormSet(RooArgSet(x)),
                                                       Range("binRange"));
-        const double Nexp = normFactor * binInt->getVal();
+        const double Nexp = Nfit * binInt->getVal();
         delete binInt;
 
         const double Nobs = h_exp->GetBinContent(i);
@@ -476,7 +436,7 @@ void fitMomdis(double erelMin = 4, double erelMax = 7.5)
 
         const double r = (Nobs - Nexp) / std::sqrt(Nexp);
         h_res->SetBinContent(i, r);
-        h_res->SetBinError(i, 1.0); // by construction
+        h_res->SetBinError(i, 1.0);
         if (std::abs(r) > maxAbsR)
             maxAbsR = std::abs(r);
     }
@@ -495,7 +455,6 @@ void fitMomdis(double erelMin = 4, double erelMax = 7.5)
     h_res->SetLineColor(kBlack);
     h_res->Draw("E1");
 
-    // Reference lines at 0 and +/- 1 sigma
     TLine *l0 = new TLine(h_exp->GetXaxis()->GetXmin(), 0,
                           h_exp->GetXaxis()->GetXmax(), 0);
     l0->SetLineColor(kRed);
@@ -513,14 +472,13 @@ void fitMomdis(double erelMin = 4, double erelMax = 7.5)
     c1->cd();
 
     // =====================================================================
-    // Now make the same plots for py_rf_rot
+    // py — same procedure
     // =====================================================================
     const double opamin = 1.3;
     const double opamax = 1.6;
     const int nBins = h_exp->GetNbinsX();
     const double maxBin = h_exp->GetXaxis()->GetXmax();
 
-    // Manually read py instead of px
     auto *f_py = new TFile(inFileExp.c_str());
     auto *tr_py = static_cast<TTree *>(f_py->Get("KinTree"));
 
@@ -566,37 +524,38 @@ void fitMomdis(double erelMin = 4, double erelMax = 7.5)
             h_exp_py->Fill(py * 1000.0 - offset_py);
     }
 
-    // Rebuild model for py with same templates
+    // Refit on py — keep current c_k values from the px fit as seed
     RooDataHist data_py("data_py", "experimental data py", RooArgList(x), h_exp_py);
 
-    // Refit with same initial values as nominal fit
-    std::unique_ptr<RooFitResult> fitRes_py;
-    if (nC > 1)
-    {
-        for (int k = 0; k < nC - 1; k++)
-            a[k]->setVal(a[k]->getVal()); // Use current value from nominal fit as seed
-        fitRes_py.reset(model->fitTo(data_py, Save(true), PrintLevel(-1), Minos(true)));
-    }
+    std::unique_ptr<RooFitResult> fitRes_py(
+        fitModel->fitTo(data_py,
+                        Extended(true),
+                        Save(true),
+                        PrintLevel(-1),
+                        Minos(true)));
 
-    // Physical fractions for py
-    std::vector<double> frac_nom_py(nC, 1.0);
+    std::vector<double> frac_nom_py(nC, 0.0);
     std::vector<double> frac_err_py(nC, 0.0);
-    if (nC > 1)
-        for (int k = 0; k < nC; k++)
-        {
-            frac_nom_py[k] = phi[k]->getVal();
-            frac_err_py[k] = phi[k]->getPropagatedError(*fitRes_py);
-        }
-
-    const double Ntot_py = h_exp_py->Integral();
-
-    std::cout << "\n=== Nominal RooFit result (py) ===\n";
-    std::cout << "N (data) = " << Ntot_py << "\n";
-    if (nC > 1)
+    for (int k = 0; k < nC; k++)
     {
-        for (int k = 0; k < nC - 1; k++)
-            std::cout << "a_" << k << " = " << a[k]->getVal() << " +/- " << a[k]->getError() << "\n";
+        frac_nom_py[k] = phi[k]->getVal();
+        frac_err_py[k] = (fitRes_py ? phi[k]->getPropagatedError(*fitRes_py) : 0.0);
     }
+
+    const double Nfit_py = Ntot_fv->getVal();
+    const double Nfit_py_err = (fitRes_py ? Ntot_fv->getPropagatedError(*fitRes_py) : 0.0);
+    const double Ndata_py = h_exp_py->Integral();
+
+    std::cout << "\n=== Nominal RooFit result (extended ML, py) ===\n";
+    std::cout << "N (data)  = " << Ndata_py << "\n";
+    std::cout << "N (fit)   = " << Nfit_py << "  +/- " << Nfit_py_err << "\n";
+    std::cout << "--- yields ---\n";
+    for (int k = 0; k < nC; k++)
+        std::cout << "c_" << k << " (" << labels[k] << ") = "
+                  << c[k]->getVal()
+                  << "  +/- " << c[k]->getError()
+                  << "  (MINOS +" << c[k]->getAsymErrorHi()
+                  << " / " << c[k]->getAsymErrorLo() << ")\n";
     std::cout << "--- physical fractions ---\n";
     for (int k = 0; k < nC; k++)
         std::cout << "phi(" << labels[k] << ") = " << frac_nom_py[k]
@@ -606,8 +565,7 @@ void fitMomdis(double erelMin = 4, double erelMax = 7.5)
                   << "  covQual = " << fitRes_py->covQual()
                   << "  minNll = " << fitRes_py->minNll() << "\n";
 
-    // chi2 for py
-    const double Ntot_py_for_chi2 = h_exp_py->Integral();
+    // chi2 (py)
     double chi2_py = 0.0;
     int nBinsUsed_py = 0;
     for (int i = 1; i <= h_exp_py->GetNbinsX(); i++)
@@ -615,22 +573,25 @@ void fitMomdis(double erelMin = 4, double erelMax = 7.5)
         const double lo = h_exp_py->GetXaxis()->GetBinLowEdge(i);
         const double hi = h_exp_py->GetXaxis()->GetBinUpEdge(i);
         x.setRange("binChi2_py", lo, hi);
-        RooAbsReal *binInt_py = fitModel->createIntegral(RooArgSet(x), NormSet(RooArgSet(x)),
-                                                         Range("binChi2_py"));
-        const double Nexp_py = Ntot_py_for_chi2 * binInt_py->getVal();
-        delete binInt_py;
-        if (Nexp_py <= 0)
+        RooAbsReal *binInt = fitModel->createIntegral(RooArgSet(x), NormSet(RooArgSet(x)),
+                                                      Range("binChi2_py"));
+        const double Nexp = Nfit_py * binInt->getVal();
+        delete binInt;
+        if (Nexp <= 0)
             continue;
-        const double d_py = h_exp_py->GetBinContent(i) - Nexp_py;
-        chi2_py += (d_py * d_py) / Nexp_py;
+        const double Nobs = h_exp_py->GetBinContent(i);
+        const double d = Nobs - Nexp;
+        chi2_py += (d * d) / Nexp;
         nBinsUsed_py++;
     }
     const int ndf_py = nBinsUsed_py - nC;
-    std::cout << "chi2 (py) = " << chi2_py << "  ndf = " << ndf_py
+    std::cout << "chi2 = " << chi2_py << "  ndf = " << ndf_py
+              << "  (= " << nBinsUsed_py << " bins - " << nC << " free yields)\n"
               << "  chi2/ndf = " << (ndf_py > 0 ? chi2_py / ndf_py : -1.0) << "\n";
+    std::cout << "================================================\n\n";
 
     // ---- Canvas for py ----
-    TCanvas *c_py = new TCanvas("c_py", "RooFit template fit (py)", 800, 800);
+    TCanvas *c_py = new TCanvas("c_py", "RooFit template fit (extended, py)", 800, 800);
 
     TPad *padTop_py = new TPad("padTop_py", "padTop_py", 0.0, 0.30, 1.0, 1.0);
     padTop_py->SetBottomMargin(0.02);
@@ -643,18 +604,17 @@ void fitMomdis(double erelMin = 4, double erelMax = 7.5)
 
     padTop_py->cd();
 
-    RooPlot *xframe_py = x.frame(Title("Template fit (py)"));
+    RooPlot *xframe_py = x.frame(Title("Template fit (extended ML, py)"));
     data_py.plotOn(xframe_py, Name("data_py"));
     fitModel->plotOn(xframe_py, LineColor(kRed), LineWidth(2), Name("total_py"));
 
-    if (nC > 1)
-        for (int k = 0; k < nC; k++)
-            model->plotOn(xframe_py,
-                          Components(*pdf_tmpl[k]),
-                          LineStyle(kDashed),
-                          LineColor(colors[k % colors.size()]),
-                          LineWidth(2),
-                          Name(Form("comp_py_%d", k)));
+    for (int k = 0; k < nC; k++)
+        model->plotOn(xframe_py,
+                      Components(*pdf_tmpl[k]),
+                      LineStyle(kDashed),
+                      LineColor(colors[k % colors.size()]),
+                      LineWidth(2),
+                      Name(Form("comp_py_%d", k)));
 
     xframe_py->GetXaxis()->SetLabelSize(0.0);
     xframe_py->GetXaxis()->SetTitleSize(0.0);
@@ -662,15 +622,13 @@ void fitMomdis(double erelMin = 4, double erelMax = 7.5)
 
     auto *leg_py = new TLegend(0.55, 0.60, 0.89, 0.89);
     leg_py->AddEntry(xframe_py->findObject("data_py"), "Exp", "ep");
-    leg_py->AddEntry(xframe_py->findObject("total_py"), "Fit total", "l");
+    leg_py->AddEntry(xframe_py->findObject("total_py"),
+                     Form("Fit total (N = %.0f #pm %.0f)", Nfit_py, Nfit_py_err), "l");
     for (int k = 0; k < nC; k++)
-    {
-        const char *entryName_py = (nC > 1) ? Form("comp_py_%d", k) : "total_py";
-        leg_py->AddEntry(xframe_py->findObject(entryName_py),
+        leg_py->AddEntry(xframe_py->findObject(Form("comp_py_%d", k)),
                          Form("%s (%.1f #pm %.1f)%%",
                               labels[k].c_str(), frac_nom_py[k] * 100, frac_err_py[k] * 100),
                          "l");
-    }
     leg_py->AddEntry((TObject *)nullptr,
                      Form("#chi^{2}/ndf = %.2f/%d = %.2f", chi2_py, ndf_py,
                           (ndf_py > 0 ? chi2_py / ndf_py : -1.0)),
@@ -694,7 +652,7 @@ void fitMomdis(double erelMin = 4, double erelMax = 7.5)
         x.setRange("binRange_py", lo, hi);
         RooAbsReal *binInt = fitModel->createIntegral(RooArgSet(x), NormSet(RooArgSet(x)),
                                                       Range("binRange_py"));
-        const double Nexp = Ntot_py * binInt->getVal();
+        const double Nexp = Nfit_py * binInt->getVal();
         delete binInt;
 
         const double Nobs = h_exp_py->GetBinContent(i);
