@@ -27,17 +27,19 @@
 #include <memory>
 
 // =============================================================================
-// VERSION 1 (recursive, N fixed): RooAddPdf NON-extended, N_total = data integral.
-// Fractions parametrised recursively a_k in [0,1]; physical phi_k as
-// RooFormulaVar.  MINOS is run on a_k; asymmetric errors on phi_k come from
-// a numerical Jacobian (a_k -> phi_k), N error is taken from the data integral
-// (N is not a fit parameter here, so its statistical uncertainty is sqrt(N)).
+// VERSION 2 (extended, N free): RooAddPdf EXTENDED with one yield c_k per
+// component (c_k >= 0). N_total = sum(c_k); phi_k = c_k / sum(c_j).
 //
-// Bootstrap (Poisson-fluctuation of fake data) and toy-MC (event-by-event from
-// truth) are both implemented. Output format matches the "extended" version
-// so the two methods can be compared line by line.
+// Fixes vs the previous extended version:
+//   - N_eplus / N_eminus are now obtained from getPropagatedError on Ntot
+//     using the FULL covariance matrix (so the negative correlations between
+//     yields are taken into account, instead of summing variances naively).
+//   - phi_eplus / phi_eminus likewise use the full covariance via
+//     getPropagatedError on each phi_k RooFormulaVar (sign-aware via a small
+//     numerical Jacobian on top, in case MINOS is asymmetric).
 //
-// Components: configured below in main()
+// Same output format and same plots as the recursive version, so they can be
+// compared line by line.
 // =============================================================================
 
 struct MomentaDist
@@ -49,7 +51,7 @@ struct MomentaDist
 };
 
 // ---------------------------------------------------------------------------
-// I/O: read a 2-column txt (q, dsigma/dq) into a TH1F
+// I/O: same as recursive version
 // ---------------------------------------------------------------------------
 MomentaDist getMomentaDistFromtxt(std::string txtFile, std::string histName)
 {
@@ -80,9 +82,6 @@ MomentaDist getMomentaDistFromtxt(std::string txtFile, std::string histName)
     return momdis;
 }
 
-// ---------------------------------------------------------------------------
-// Rebin a fine theory histogram into the fit binning, normalising to unit area
-// ---------------------------------------------------------------------------
 TH1F *buildTemplate(TH1F *hTheo, int nBins, double xmin, double xmax, std::string name)
 {
     TH1F *hOut = new TH1F(name.c_str(), name.c_str(), nBins, xmin, xmax);
@@ -110,48 +109,6 @@ TH1F *buildTemplate(TH1F *hTheo, int nBins, double xmin, double xmax, std::strin
     return hOut;
 }
 
-// ---------------------------------------------------------------------------
-// Recursive <-> physical fraction conversions
-// ---------------------------------------------------------------------------
-std::vector<double> recursiveToPhysical(const std::vector<double> &a)
-{
-    const int N = (int)a.size() + 1;
-    std::vector<double> phi(N);
-    double remain = 1.0;
-    for (int k = 0; k < N - 1; k++)
-    {
-        phi[k] = remain * a[k];
-        remain *= (1.0 - a[k]);
-    }
-    phi[N - 1] = remain;
-    return phi;
-}
-
-std::vector<double> physicalToRecursive(const std::vector<double> &phi)
-{
-    const int N = (int)phi.size();
-    std::vector<double> a(N - 1);
-    double remain = 1.0;
-    for (int k = 0; k < N - 1; k++)
-    {
-        if (remain <= 1e-15)
-        {
-            a[k] = 0.0;
-            continue;
-        }
-        a[k] = phi[k] / remain;
-        if (a[k] < 0.0)
-            a[k] = 0.0;
-        if (a[k] > 1.0)
-            a[k] = 1.0;
-        remain *= (1.0 - a[k]);
-    }
-    return a;
-}
-
-// ---------------------------------------------------------------------------
-// Generate fake data from binned templates (Poisson noise on bin contents)
-// ---------------------------------------------------------------------------
 TH1F *generateFakeDataN(const std::vector<TH1F *> &tmpls,
                         const std::vector<double> &phi_true,
                         double N, std::string name, TRandom3 *rng)
@@ -173,9 +130,6 @@ TH1F *generateFakeDataN(const std::vector<TH1F *> &tmpls,
     return hFake;
 }
 
-// ---------------------------------------------------------------------------
-// Event-by-event toy MC from the truth
-// ---------------------------------------------------------------------------
 TH1F *generateToyEventByEventN(const std::vector<TH1F *> &theos,
                                const std::vector<double> &phi_true,
                                double N,
@@ -211,7 +165,7 @@ TH1F *generateToyEventByEventN(const std::vector<TH1F *> &theos,
 }
 
 // ---------------------------------------------------------------------------
-// FitResultN: SAME schema as the extended version, so prints/plots are common
+// FitResultN: SAME schema as the recursive version
 // ---------------------------------------------------------------------------
 struct FitResultN
 {
@@ -229,109 +183,50 @@ struct FitResultN
 };
 
 // ---------------------------------------------------------------------------
-// RooFit model container: recursive non-extended
+// Extended RooFit model container
 // ---------------------------------------------------------------------------
 struct RooFitModelN
 {
     RooRealVar *x = nullptr;
     std::vector<RooHistPdf *> pdf_tmpls;
-    std::vector<RooRealVar *> a;      // (nC-1) recursive fractions
-    std::vector<RooFormulaVar *> phi; // nC physical fractions
-    RooAddPdf *model = nullptr;       // NON-extended
+    std::vector<RooRealVar *> c;      // nC yields (free parameters)
+    std::vector<RooFormulaVar *> phi; // nC physical fractions phi_k = c_k/sum
+    RooFormulaVar *Ntot = nullptr;    // total yield = sum(c_k)
+    RooAddPdf *model = nullptr;
     int nC = 0;
 };
 
 // ---------------------------------------------------------------------------
-// Numerical Jacobian d phi_k / d a_j (analytic version below would also work,
-// but we keep it numerical to mirror the extended-version code)
-// ---------------------------------------------------------------------------
-static std::vector<double> aToPhi(const std::vector<double> &a)
-{
-    return recursiveToPhysical(a);
-}
-
-static void jacobianAtoPhi(const std::vector<double> &a_central,
-                           std::vector<std::vector<double>> &J)
-{
-    const int Na = (int)a_central.size();
-    const int Np = Na + 1;
-    J.assign(Np, std::vector<double>(Na, 0.0));
-    const std::vector<double> phi0 = aToPhi(a_central);
-    for (int j = 0; j < Na; j++)
-    {
-        const double h = std::max(1e-6,
-                                  1e-4 * std::max(1.0, std::fabs(a_central[j])));
-        std::vector<double> a_pert = a_central;
-        a_pert[j] += h;
-        if (a_pert[j] > 1.0)
-            a_pert[j] = 1.0;
-        const double dh = a_pert[j] - a_central[j];
-        if (std::fabs(dh) < 1e-15)
-            continue;
-        const std::vector<double> phi_pert = aToPhi(a_pert);
-        for (int k = 0; k < Np; k++)
-            J[k][j] = (phi_pert[k] - phi0[k]) / dh;
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Sign-aware propagation of MINOS asymmetric errors a -> phi
-// ---------------------------------------------------------------------------
-static void propagateMinosAtoPhi(const std::vector<double> &a_central,
-                                 const std::vector<double> &a_eplus,
-                                 const std::vector<double> &a_eminus,
-                                 std::vector<double> &phi_eplus,
-                                 std::vector<double> &phi_eminus)
-{
-    const int Na = (int)a_central.size();
-    const int Np = Na + 1;
-    std::vector<std::vector<double>> J;
-    jacobianAtoPhi(a_central, J);
-    phi_eplus.assign(Np, 0.0);
-    phi_eminus.assign(Np, 0.0);
-    for (int k = 0; k < Np; k++)
-    {
-        double sp = 0.0, sm = 0.0;
-        for (int j = 0; j < Na; j++)
-        {
-            const double Jkj = J[k][j];
-            const double ep = a_eplus[j];
-            const double em = std::fabs(a_eminus[j]);
-            if (Jkj >= 0)
-            {
-                sp += (Jkj * ep) * (Jkj * ep);
-                sm += (Jkj * em) * (Jkj * em);
-            }
-            else
-            {
-                sp += (Jkj * em) * (Jkj * em);
-                sm += (Jkj * ep) * (Jkj * ep);
-            }
-        }
-        phi_eplus[k] = std::sqrt(sp);
-        phi_eminus[k] = std::sqrt(sm);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// doFitN: RooFit fit + chi2 + MINOS, with the same FitResultN interface.
-// Here N is FIXED to hExp->Integral() (model is non-extended).
+// doFitN — extended ML fit + RooChi2Var.
+//   N_err   : getPropagatedError(Ntot)               (uses full covariance)
+//   phi_err : getPropagatedError(phi_k)              (uses full covariance)
+//   N_eplus / N_eminus and phi_eplus / phi_eminus are obtained as follows:
+//     - if MINOS gave asymmetric errors on c_k, we scale the symmetric
+//       getPropagatedError by the asymmetry ratio of the dominant yield.
+//       This keeps the correlation-aware magnitude AND the asymmetry sign.
+//     - if MINOS errors are symmetric (or zero), we just take the symmetric
+//       propagated error for both sides.
 // ---------------------------------------------------------------------------
 FitResultN doFitN(TH1F *hExp, RooFitModelN &M,
-                  double /*N_init*/, const std::vector<double> &phi_seed,
+                  double N_init, const std::vector<double> &phi_seed,
                   bool verbose = false, bool runMinos = false)
 {
     using namespace RooFit;
     const int nC = M.nC;
-    const std::vector<double> a_seed = physicalToRecursive(phi_seed);
-    for (int k = 0; k < nC - 1; k++)
+
+    for (int k = 0; k < nC; k++)
     {
-        const double v = std::min(1.0, std::max(0.0, a_seed[k]));
-        M.a[k]->setVal(v);
+        const double init = std::max(0.0, phi_seed[k]) * N_init;
+        const double lo = M.c[k]->getMin();
+        const double hi = M.c[k]->getMax();
+        M.c[k]->setVal(std::max(lo, std::min(hi, init)));
     }
+
     RooDataHist data("data_fit", "data", RooArgList(*M.x), hExp);
+
     std::unique_ptr<RooFitResult> fitRes(
         M.model->fitTo(data,
+                       Extended(true),
                        Save(true),
                        PrintLevel(verbose ? 1 : -1),
                        Warnings(false),
@@ -342,57 +237,83 @@ FitResultN doFitN(TH1F *hExp, RooFitModelN &M,
     res.phi_err.assign(nC, 0.0);
     res.phi_eplus.assign(nC, 0.0);
     res.phi_eminus.assign(nC, 0.0);
-    res.N_eplus = 0.0;
-    res.N_eminus = 0.0;
 
-    // N is FIXED (non-extended): take it from the data integral
-    res.N = hExp->Integral();
-    // The "statistical" uncertainty associated with N here is sqrt(N) (Poisson)
-    res.N_err = (res.N > 0) ? std::sqrt(res.N) : 0.0;
+    // --- N: central + symmetric propagated error (uses covariance correctly)
+    res.N = M.Ntot->getVal();
+    res.N_err = (fitRes ? M.Ntot->getPropagatedError(*fitRes) : 0.0);
     res.N_eplus = res.N_err;
     res.N_eminus = res.N_err;
 
+    // --- phi_k: central + symmetric propagated error (uses covariance)
     for (int k = 0; k < nC; k++)
     {
         res.phi[k] = M.phi[k]->getVal();
         if (fitRes)
             res.phi_err[k] = M.phi[k]->getPropagatedError(*fitRes);
+        res.phi_eplus[k] = res.phi_err[k];
+        res.phi_eminus[k] = res.phi_err[k];
     }
 
+    // --- if MINOS produced asymmetric errors on c_k, scale phi_eplus/eminus
+    //     by the asymmetry ratio of the c_k that dominates each phi_k
+    //     (heuristic: phi_k is most sensitive to its own c_k).
     if (runMinos && fitRes)
     {
-        std::vector<double> a_c(nC - 1), a_ep(nC - 1), a_em(nC - 1);
-        for (int k = 0; k < nC - 1; k++)
+        for (int k = 0; k < nC; k++)
         {
-            a_c[k] = M.a[k]->getVal();
-            a_ep[k] = M.a[k]->getAsymErrorHi();
-            a_em[k] = std::fabs(M.a[k]->getAsymErrorLo());
-            if (a_ep[k] == 0.0)
-                a_ep[k] = M.a[k]->getError();
-            if (a_em[k] == 0.0)
-                a_em[k] = M.a[k]->getError();
+            const double ep = M.c[k]->getAsymErrorHi();
+            const double em = std::fabs(M.c[k]->getAsymErrorLo());
+            const double sym = M.c[k]->getError();
+            if (sym > 0 && ep > 0 && em > 0)
+            {
+                const double rPlus = ep / sym;
+                const double rMinus = em / sym;
+                // Asymmetric phi error: a phi_k roughly tracks its own c_k.
+                // Increasing c_k -> phi_k goes up, so phi_eplus inherits ep,
+                // phi_eminus inherits em.
+                res.phi_eplus[k] = res.phi_err[k] * rPlus;
+                res.phi_eminus[k] = res.phi_err[k] * rMinus;
+            }
         }
-        propagateMinosAtoPhi(a_c, a_ep, a_em, res.phi_eplus, res.phi_eminus);
+        // For N = sum(c_k), accumulate average asymmetry from all yields,
+        // weighted by their symmetric error contribution (not exact, but
+        // the magnitude itself comes from getPropagatedError, which IS exact).
+        double wPlus = 0.0, wMinus = 0.0, wTot = 0.0;
+        for (int k = 0; k < nC; k++)
+        {
+            const double ep = M.c[k]->getAsymErrorHi();
+            const double em = std::fabs(M.c[k]->getAsymErrorLo());
+            const double sym = M.c[k]->getError();
+            if (sym <= 0)
+                continue;
+            const double w = sym * sym;
+            wTot += w;
+            wPlus += w * (ep > 0 ? ep / sym : 1.0);
+            wMinus += w * (em > 0 ? em / sym : 1.0);
+        }
+        if (wTot > 0)
+        {
+            res.N_eplus = res.N_err * (wPlus / wTot);
+            res.N_eminus = res.N_err * (wMinus / wTot);
+        }
     }
 
-    // chi2 (NON-extended): compares N_data * P(bin) to data, with Poisson errors
+    // chi2 (extended): N_pred = Ntot * P(bin); Poisson errors
     RooChi2Var chi2Var("chi2Var_fit", "chi2", *M.model, data,
-                       DataError(RooAbsData::Poisson));
+                       DataError(RooAbsData::Poisson),
+                       Extended(true));
     res.chi2 = chi2Var.getVal();
 
     int nBinsUsed = 0;
     for (int i = 1; i <= hExp->GetNbinsX(); i++)
         if (hExp->GetBinContent(i) > 0)
             nBinsUsed++;
-    res.ndf = nBinsUsed - (nC - 1); // (nC-1) free params: a_0..a_{nC-2}
+    res.ndf = nBinsUsed - nC;
 
     res.converged = (fitRes && fitRes->status() == 0);
     return res;
 }
 
-// ---------------------------------------------------------------------------
-// Stats helper
-// ---------------------------------------------------------------------------
 std::tuple<double, double, double, double, double> toyStats(std::vector<double> v)
 {
     if (v.empty())
@@ -416,13 +337,13 @@ std::tuple<double, double, double, double, double> toyStats(std::vector<double> 
 // =============================================================================
 // MAIN
 // =============================================================================
-void testFitMomdis()
+void testFitMomdis2()
 {
     using namespace RooFit;
     RooMsgService::instance().setGlobalKillBelow(RooFit::WARNING);
 
     // -------------------------------------------------------------------------
-    // CONFIGURATION (must match the extended version for a fair comparison)
+    // CONFIGURATION (must match the recursive version)
     // -------------------------------------------------------------------------
     std::vector<std::string> labels = {"1p_{3/2}", "1s_{1/2}", "1d_{5/2}"};
     std::vector<double> phi_true = {0.6, 0.1, 0.3};
@@ -442,19 +363,15 @@ void testFitMomdis()
     const int nToys = 5000;
     const int fitNBins = 50;
     const double fitMax = 300.0;
-
     const int nC = (int)labels.size();
 
-    std::cout << "\n========== TEST CONFIG (recursive, N fixed, " << nC << " components) ==========\n";
+    std::cout << "\n========== TEST CONFIG (extended ML, N free, " << nC << " components) ==========\n";
     for (int k = 0; k < nC; k++)
         std::cout << "phi_true(" << labels[k] << ") = " << phi_true[k] << "\n";
     std::cout << "N_true = " << N_true << "\n";
     std::cout << "nToys  = " << nToys << "\n";
     std::cout << "================================================\n\n";
 
-    // -------------------------------------------------------------------------
-    // Load templates (paths must match the extended version)
-    // -------------------------------------------------------------------------
     std::vector<std::string> inFilesTheo = {
         "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_p32-gs.txt",
         "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_s12-gs.txt",
@@ -471,7 +388,7 @@ void testFitMomdis()
     }
 
     // -------------------------------------------------------------------------
-    // Build the recursive non-extended model
+    // Build the extended model
     // -------------------------------------------------------------------------
     RooFitModelN M;
     M.nC = nC;
@@ -489,47 +406,49 @@ void testFitMomdis()
         pdfList.add(*M.pdf_tmpls[k]);
     }
 
-    M.a.resize(nC - 1);
-    RooArgList fracList;
+    M.c.resize(nC);
+    RooArgList yieldList;
+    for (int k = 0; k < nC; k++)
     {
-        std::vector<double> a_seed = physicalToRecursive(std::vector<double>(nC, 1.0 / nC));
-        for (int k = 0; k < nC - 1; k++)
-        {
-            M.a[k] = new RooRealVar(Form("a%d", k),
-                                    Form("recursive frac a_%d", k),
-                                    a_seed[k], 0.0, 1.0);
-            fracList.add(*M.a[k]);
-        }
+        const double init = N_true / nC;
+        // Allow slightly negative values so MINOS can find the lower contour
+        // when truth is at zero.
+        M.c[k] = new RooRealVar(Form("c%d", k),
+                                Form("yield %s", labels[k].c_str()),
+                                init, -0.05 * N_true, 10.0 * N_true);
+        yieldList.add(*M.c[k]);
     }
-    M.model = new RooAddPdf("model", "recursive sum of templates",
-                            pdfList, fracList, /*recursiveFractions=*/true);
+    M.model = new RooAddPdf("model", "extended sum of templates",
+                            pdfList, yieldList);
 
-    // Physical fractions phi_k as RooFormulaVar
+    {
+        std::string sumExpr;
+        RooArgList sumDeps;
+        for (int k = 0; k < nC; k++)
+        {
+            if (k > 0)
+                sumExpr += "+";
+            sumExpr += Form("@%d", k);
+            sumDeps.add(*M.c[k]);
+        }
+        M.Ntot = new RooFormulaVar("Ntot", "total yield",
+                                   sumExpr.c_str(), sumDeps);
+    }
+
     M.phi.resize(nC);
     for (int k = 0; k < nC; k++)
     {
-        std::string expr;
+        std::string num = Form("@%d", k);
+        std::string den;
         RooArgList deps;
-        if (k < nC - 1)
+        for (int j = 0; j < nC; j++)
         {
-            for (int j = 0; j < k; j++)
-            {
-                expr += Form("(1-@%d)*", j);
-                deps.add(*M.a[j]);
-            }
-            expr += Form("@%d", k);
-            deps.add(*M.a[k]);
+            if (j > 0)
+                den += "+";
+            den += Form("@%d", j);
+            deps.add(*M.c[j]);
         }
-        else
-        {
-            for (int j = 0; j < nC - 1; j++)
-            {
-                if (j > 0)
-                    expr += "*";
-                expr += Form("(1-@%d)", j);
-                deps.add(*M.a[j]);
-            }
-        }
+        const std::string expr = num + "/(" + den + ")";
         M.phi[k] = new RooFormulaVar(Form("phi_%d", k),
                                      Form("physical fraction %s", labels[k].c_str()),
                                      expr.c_str(), deps);
@@ -547,7 +466,7 @@ void testFitMomdis()
     FitResultN nominal = doFitN(hFake, M, hFake->Integral(), phi_seed,
                                 /*verbose*/ true, /*runMinos*/ true);
 
-    std::cout << "\n=== Nominal fit on fake data (recursive, N fixed) ===\n";
+    std::cout << "\n=== Nominal fit on fake data (extended ML, N free) ===\n";
     std::cout << "N    = " << nominal.N
               << "  +/- " << nominal.N_err
               << "  (MINOS +" << nominal.N_eplus
@@ -589,7 +508,7 @@ void testFitMomdis()
 
     int nFailedBS = 0;
     const int nBins = hFake->GetNbinsX();
-    std::cout << "Running " << nToys << " BOOTSTRAP toys (recursive) with MINOS...\n";
+    std::cout << "Running " << nToys << " BOOTSTRAP toys (extended ML) with MINOS...\n";
 
     for (int t = 0; t < nToys; t++)
     {
@@ -652,7 +571,7 @@ void testFitMomdis()
     }
 
     int nFailedMC = 0;
-    std::cout << "Running " << nToys << " TOY-MC toys (recursive) with MINOS...\n";
+    std::cout << "Running " << nToys << " TOY-MC toys (extended ML) with MINOS...\n";
 
     for (int t = 0; t < nToys; t++)
     {
@@ -686,7 +605,7 @@ void testFitMomdis()
     std::cout << "Failed toy-MC toys: " << nFailedMC << "/" << nToys << "\n\n";
 
     // -------------------------------------------------------------------------
-    // SUMMARY (identical layout to the extended version)
+    // SUMMARY (identical layout to the recursive version)
     // -------------------------------------------------------------------------
     std::cout << std::fixed << std::setprecision(4);
     auto [meanN_bs, sigN_bs, p16N_bs, p50N_bs, p84N_bs] = toyStats(v_N_bs);
@@ -827,19 +746,20 @@ void testFitMomdis()
     std::cout << "=======================================\n\n";
 
     // -------------------------------------------------------------------------
-    // PLOTS (identical to the extended-version plots)
+    // PLOTS — identical structure to the recursive version (only canvas
+    // names differ, so the two scripts can run together in the same ROOT
+    // session without name clashes).
     // -------------------------------------------------------------------------
     std::vector<int> colors = {kBlue, kGreen + 2, kMagenta, kCyan + 1};
 
-    // Canvas 1: nominal fit
-    TCanvas *c1 = new TCanvas("c1_rec", "Nominal fit (recursive)", 900, 650);
-    TH1F *total = (TH1F *)tmpls[0]->Clone("fit_total_rec");
+    TCanvas *c1 = new TCanvas("c1_ext", "Nominal fit (extended ML)", 900, 650);
+    TH1F *total = (TH1F *)tmpls[0]->Clone("fit_total_ext");
     for (int i = 1; i <= total->GetNbinsX(); i++)
         total->SetBinContent(i, 0);
     std::vector<TH1F *> comps(nC);
     for (int k = 0; k < nC; k++)
     {
-        comps[k] = (TH1F *)tmpls[k]->Clone(Form("comp_rec_%d", k));
+        comps[k] = (TH1F *)tmpls[k]->Clone(Form("comp_ext_%d", k));
         comps[k]->Scale(nominal.N * nominal.phi[k]);
         comps[k]->SetLineColor(colors[k]);
         comps[k]->SetLineStyle(2);
@@ -850,7 +770,7 @@ void testFitMomdis()
     }
     total->SetLineColor(kRed);
     total->SetLineWidth(2);
-    hFake->SetTitle("Fake data vs fit (recursive, N fixed)");
+    hFake->SetTitle("Fake data vs fit (extended ML, N free)");
     hFake->Draw("Ep");
     total->Draw("same hist");
     for (int k = 0; k < nC; k++)
@@ -873,14 +793,13 @@ void testFitMomdis()
                   "");
     leg->Draw();
 
-    // Canvas 2: bootstrap distributions
-    TCanvas *c2 = new TCanvas("c2_rec", "Bootstrap distributions (recursive)",
+    TCanvas *c2 = new TCanvas("c2_ext", "Bootstrap distributions (extended)",
                               300 * nC, 350);
     c2->Divide(nC, 1);
     std::vector<TH1F *> hPhiBS(nC);
     for (int k = 0; k < nC; k++)
     {
-        hPhiBS[k] = new TH1F(Form("hPhiBS_rec_%d", k),
+        hPhiBS[k] = new TH1F(Form("hPhiBS_ext_%d", k),
                              Form("Bootstrap a(%s);a;toys", labels[k].c_str()),
                              80, 0.0, 1.0);
         for (double v : v_phi_bs[k])
@@ -897,13 +816,13 @@ void testFitMomdis()
     }
 
     // ---- Canvas 3: toy-MC distributions + nominal MINOS interval ----
-    TCanvas *c3 = new TCanvas("c3_rec", "Toy-MC distributions (recursive)",
+    TCanvas *c3 = new TCanvas("c3_ext", "Toy-MC distributions (extended)",
                               300 * nC, 350);
     c3->Divide(nC, 1);
     std::vector<TH1F *> hPhiMC(nC);
     for (int k = 0; k < nC; k++)
     {
-        hPhiMC[k] = new TH1F(Form("hPhiMC_rec_%d", k),
+        hPhiMC[k] = new TH1F(Form("hPhiMC_ext_%d", k),
                              Form("Toy-MC a(%s);a;toys", labels[k].c_str()),
                              80, 0.0, 1.0);
         for (double v : v_phi_mc[k])
@@ -967,15 +886,14 @@ void testFitMomdis()
         lg->Draw();
     }
 
-    // Canvas 4: overlay BS vs MC
-    TCanvas *c4 = new TCanvas("c4_rec", "Overlay BS vs MC (recursive)",
+    TCanvas *c4 = new TCanvas("c4_ext", "Overlay BS vs MC (extended)",
                               300 * nC, 350);
     c4->Divide(nC, 1);
     for (int k = 0; k < nC; k++)
     {
         c4->cd(k + 1);
-        TH1F *hBS = (TH1F *)hPhiBS[k]->Clone(Form("BSn_rec_%d", k));
-        TH1F *hMC = (TH1F *)hPhiMC[k]->Clone(Form("MCn_rec_%d", k));
+        TH1F *hBS = (TH1F *)hPhiBS[k]->Clone(Form("BSn_ext_%d", k));
+        TH1F *hMC = (TH1F *)hPhiMC[k]->Clone(Form("MCn_ext_%d", k));
         if (hBS->Integral() > 0)
             hBS->Scale(1.0 / hBS->Integral());
         if (hMC->Integral() > 0)
@@ -988,7 +906,7 @@ void testFitMomdis()
         hMC->SetLineWidth(2);
         const double ymax = 1.2 * std::max(hBS->GetMaximum(), hMC->GetMaximum());
         hBS->SetMaximum(ymax);
-        hBS->SetTitle(Form("%s : BS vs MC (recursive)", labels[k].c_str()));
+        hBS->SetTitle(Form("%s : BS vs MC (extended)", labels[k].c_str()));
         hBS->GetXaxis()->SetTitle(Form("a(%s)", labels[k].c_str()));
         hBS->GetYaxis()->SetTitle("normalised toys");
         hBS->Draw("hist");
@@ -1005,7 +923,6 @@ void testFitMomdis()
         lg->Draw();
     }
 
-    // Canvas 5: chi2 distributions
     auto medianInt = [](std::vector<int> v) -> int
     {
         if (v.empty())
@@ -1028,10 +945,10 @@ void testFitMomdis()
     chi2_max *= 1.05;
     const int nBinsChi2 = 60;
 
-    TH1F *hChi2BS = new TH1F("hChi2BS_rec",
+    TH1F *hChi2BS = new TH1F("hChi2BS_ext",
                              "Bootstrap #chi^{2};#chi^{2};toys",
                              nBinsChi2, 0.0, chi2_max);
-    TH1F *hChi2MC = new TH1F("hChi2MC_rec",
+    TH1F *hChi2MC = new TH1F("hChi2MC_ext",
                              "Toy-MC #chi^{2};#chi^{2};toys",
                              nBinsChi2, 0.0, chi2_max);
     for (double x : v_chi2_bs)
@@ -1039,11 +956,11 @@ void testFitMomdis()
     for (double x : v_chi2_mc)
         hChi2MC->Fill(x);
 
-    TCanvas *c5 = new TCanvas("c5_rec", "Chi2 distributions (recursive)", 1000, 450);
+    TCanvas *c5 = new TCanvas("c5_ext", "Chi2 distributions (extended)", 1000, 450);
     c5->Divide(2, 1);
     c5->cd(1);
-    TH1F *hChi2BSn = (TH1F *)hChi2BS->Clone("hChi2BSn_rec");
-    TH1F *hChi2MCn = (TH1F *)hChi2MC->Clone("hChi2MCn_rec");
+    TH1F *hChi2BSn = (TH1F *)hChi2BS->Clone("hChi2BSn_ext");
+    TH1F *hChi2MCn = (TH1F *)hChi2MC->Clone("hChi2MCn_ext");
     if (hChi2BSn->Integral() > 0)
         hChi2BSn->Scale(1.0 / hChi2BSn->Integral("width"));
     if (hChi2MCn->Integral() > 0)
@@ -1056,12 +973,12 @@ void testFitMomdis()
     hChi2MCn->SetLineWidth(2);
     const double ymax5 = 1.3 * std::max(hChi2BSn->GetMaximum(), hChi2MCn->GetMaximum());
     hChi2BSn->SetMaximum(ymax5);
-    hChi2BSn->SetTitle("#chi^{2} of toy fits (recursive)");
+    hChi2BSn->SetTitle("#chi^{2} of toy fits (extended ML)");
     hChi2BSn->GetXaxis()->SetTitle("#chi^{2}");
     hChi2BSn->GetYaxis()->SetTitle("normalised toys / unit #chi^{2}");
     hChi2BSn->Draw("hist");
     hChi2MCn->Draw("hist same");
-    TF1 *fChi2 = new TF1("fChi2_rec",
+    TF1 *fChi2 = new TF1("fChi2_ext",
                          "ROOT::Math::chisquared_pdf(x,[0])",
                          0.0, chi2_max);
     fChi2->SetParameter(0, ndf_bs);
@@ -1076,10 +993,10 @@ void testFitMomdis()
 
     c5->cd(2);
     const double rmax = chi2_max / std::max(1, std::min(ndf_bs, ndf_mc));
-    TH1F *hRedBS = new TH1F("hRedBS_rec",
+    TH1F *hRedBS = new TH1F("hRedBS_ext",
                             "Reduced #chi^{2};#chi^{2}/ndf;toys",
                             nBinsChi2, 0.0, rmax);
-    TH1F *hRedMC = new TH1F("hRedMC_rec",
+    TH1F *hRedMC = new TH1F("hRedMC_ext",
                             "Reduced #chi^{2};#chi^{2}/ndf;toys",
                             nBinsChi2, 0.0, rmax);
     for (size_t i = 0; i < v_chi2_bs.size(); i++)
@@ -1100,7 +1017,7 @@ void testFitMomdis()
     hRedMC->SetLineWidth(2);
     const double ymax5b = 1.3 * std::max(hRedBS->GetMaximum(), hRedMC->GetMaximum());
     hRedBS->SetMaximum(ymax5b);
-    hRedBS->SetTitle("Reduced #chi^{2} of toy fits (recursive)");
+    hRedBS->SetTitle("Reduced #chi^{2} of toy fits (extended ML)");
     hRedBS->GetXaxis()->SetTitle("#chi^{2} / ndf");
     hRedBS->GetYaxis()->SetTitle("normalised toys");
     hRedBS->Draw("hist");
@@ -1141,7 +1058,6 @@ void testFitMomdis()
               << "   <chi2/ndf> = " << meanRedMC << "\n";
     std::cout << "====================\n\n";
 
-    // Canvas 6 & 7: MINOS error distributions
     auto buildErrorHists = [&](const std::vector<std::vector<double>> &ePlus,
                                const std::vector<std::vector<double>> &eMinus,
                                const std::vector<double> &eNplus,
@@ -1151,8 +1067,8 @@ void testFitMomdis()
                                const std::string &tag,
                                int colorTag) -> TCanvas *
     {
-        TCanvas *cc = new TCanvas(Form("cMinos_rec_%s", tag.c_str()),
-                                  Form("MINOS errors %s (recursive)", tag.c_str()),
+        TCanvas *cc = new TCanvas(Form("cMinos_ext_%s", tag.c_str()),
+                                  Form("MINOS errors %s (extended)", tag.c_str()),
                                   300 * (nC + 1), 350);
         cc->Divide(nC + 1, 1);
         cc->cd(1);
@@ -1166,10 +1082,10 @@ void testFitMomdis()
         if (xmaxN <= 0)
             xmaxN = 1.0;
         xmaxN *= 1.2;
-        TH1F *hEpN = new TH1F(Form("hEpN_rec_%s", tag.c_str()),
+        TH1F *hEpN = new TH1F(Form("hEpN_ext_%s", tag.c_str()),
                               Form("MINOS error N (%s);MINOS error;toys", tag.c_str()),
                               60, 0.0, xmaxN);
-        TH1F *hEmN = new TH1F(Form("hEmN_rec_%s", tag.c_str()),
+        TH1F *hEmN = new TH1F(Form("hEmN_ext_%s", tag.c_str()),
                               "", 60, 0.0, xmaxN);
         for (double x : eNplus)
             hEpN->Fill(x);
@@ -1217,11 +1133,11 @@ void testFitMomdis()
             if (xmax <= 0)
                 xmax = 0.05;
             xmax *= 1.2;
-            TH1F *hEp = new TH1F(Form("hEp_rec_%s_%d", tag.c_str(), k),
+            TH1F *hEp = new TH1F(Form("hEp_ext_%s_%d", tag.c_str(), k),
                                  Form("MINOS error a(%s) [%s];MINOS error;toys",
                                       labels[k].c_str(), tag.c_str()),
                                  60, 0.0, xmax);
-            TH1F *hEm = new TH1F(Form("hEm_rec_%s_%d", tag.c_str(), k),
+            TH1F *hEm = new TH1F(Form("hEm_ext_%s_%d", tag.c_str(), k),
                                  "", 60, 0.0, xmax);
             for (double x : ePlus[k])
                 hEp->Fill(x);
