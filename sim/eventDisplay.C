@@ -1,12 +1,12 @@
 void eventDisplay()
 {
   FairRunAna *fRun = new FairRunAna();
-  fRun->SetSource(new FairFileSource("./califa/sim.root"));
-  fRun->SetSink(new FairRootFileSink("./califa/vis.root"));
+  fRun->SetSource(new FairFileSource("./full/glad.simu.root"));
+  fRun->SetSink(new FairRootFileSink("./full/vis.root"));
 
   FairRuntimeDb *rtdb = fRun->GetRuntimeDb();
   FairParRootFileIo *parIo1 = new FairParRootFileIo();
-  parIo1->open("./califa/par.root");
+  parIo1->open("./full/glad.para.root");
   rtdb->setFirstInput(parIo1);
   rtdb->print();
 
