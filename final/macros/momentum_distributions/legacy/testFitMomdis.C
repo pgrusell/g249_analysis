@@ -929,35 +929,35 @@ void testFitMomdis()
         lt->SetLineWidth(2);
         lt->Draw();
 
-        // MINOS interval from the nominal fit (blue dashed)
-        const double xLo = nominal.phi[k] - nominal.phi_eminus[k];
-        const double xHi = nominal.phi[k] + nominal.phi_eplus[k];
-        TLine *lLo = new TLine(xLo, 0, xLo, ymax);
-        TLine *lHi = new TLine(xHi, 0, xHi, ymax);
-        for (TLine *l : {lLo, lHi})
-        {
-            l->SetLineColor(kBlue + 1);
-            l->SetLineStyle(2);
-            l->SetLineWidth(2);
-            l->Draw();
-        }
+        // // MINOS interval from the nominal fit (blue dashed)
+        // const double xLo = nominal.phi[k] - nominal.phi_eminus[k];
+        // const double xHi = nominal.phi[k] + nominal.phi_eplus[k];
+        // TLine *lLo = new TLine(xLo, 0, xLo, ymax);
+        // TLine *lHi = new TLine(xHi, 0, xHi, ymax);
+        // for (TLine *l : {lLo, lHi})
+        // {
+        //     l->SetLineColor(kBlue + 1);
+        //     l->SetLineStyle(2);
+        //     l->SetLineWidth(2);
+        //     l->Draw();
+        // }
 
-        // nominal central value (solid blue)
-        TLine *lNom = new TLine(nominal.phi[k], 0, nominal.phi[k], ymax);
-        lNom->SetLineColor(kBlue + 1);
-        lNom->SetLineStyle(1);
-        lNom->SetLineWidth(2);
-        lNom->Draw();
+        // // nominal central value (solid blue)
+        // TLine *lNom = new TLine(nominal.phi[k], 0, nominal.phi[k], ymax);
+        // lNom->SetLineColor(kBlue + 1);
+        // lNom->SetLineStyle(1);
+        // lNom->SetLineWidth(2);
+        // lNom->Draw();
 
         auto *lg = new TLegend(0.55, 0.62, 0.92, 0.92);
         lg->SetTextSize(0.030);
         lg->AddEntry(hPhiMC[k], "Toy-MC", "f");
         lg->AddEntry(lt, Form("truth = %.3f", phi_true[k]), "l");
-        lg->AddEntry(lNom, Form("nominal #hat{a} = %.3f", nominal.phi[k]), "l");
-        lg->AddEntry(lLo,
-                     Form("MINOS [-%.3f, +%.3f]",
-                          nominal.phi_eminus[k], nominal.phi_eplus[k]),
-                     "l");
+        // lg->AddEntry(lNom, Form("nominal #hat{a} = %.3f", nominal.phi[k]), "l");
+        // lg->AddEntry(lLo,
+        //              Form("MINOS [-%.3f, +%.3f]",
+        //                   nominal.phi_eminus[k], nominal.phi_eplus[k]),
+        //              "l");
         lg->AddEntry((TObject *)nullptr,
                      Form("#sigma_{MINOS} = %.4f", sMinos), "");
         lg->AddEntry((TObject *)nullptr,
