@@ -1,18 +1,23 @@
 /** --------------------------------------------------------------------
  **
  **  Define the simulation setup for experiment G249
- **  Author: <j.l.rodriguez.sanchez@udc.es>
  **
- **  Last Update: 22/07/25
+ **  Last Update: 21/05/26
  **  Comments:
  **         - 22/07/25 : Initial setup
+ **         - 21/05/26 : Switched primary generator to
+ **                      R3BTheoreticalSPOMomdisGenerator. The fragment
+ **                      momentum is now sampled from a theoretical SPO
+ **                      distribution (TH3 in 25F rest frame), boosted
+ **                      with an experimental parent-beta histogram, and
+ **                      placed at a vertex drawn from an experimental
+ **                      beam-spot (x,y) histogram, uniformly along the
+ **                      5 cm target in z.
  **
- **  Configuration:
- **  (1) Select the right generator "fGenerator"
- **  (2) Select the detectors that you wish for the simulation, for instance,
- *"fCalifa = true"
- **  (3) Look at the file "s455_setup.par" that the positions of your detectors
- *are right
+ **  Inputs expected (TString paths set below):
+ **    - fPMom3DFile  : ROOT file containing TH3  "h3_pxpypz" (GeV/c)
+ **    - fVertexFile  : ROOT file containing TH2  "hVertexXY" (cm)
+ **    - fBetaFile    : ROOT file containing TH1  "h"         (dimensionless)
  **
  **  Execute it as follows:
  **  root -l 'runsim.C(1000)'
@@ -20,7 +25,7 @@
  **
  **/
 
-void runsim(Int_t nEvents = 10)
+void runsim(Int_t nEvents = 1000)
 {
     // Timer
     TStopwatch timer;
@@ -28,8 +33,8 @@ void runsim(Int_t nEvents = 10)
 
     // Logging
     auto logger = FairLogger::GetLogger();
-    // logger->SetLogVerbosityLevel("low");
-    // logger->SetLogScreenLevel("warn");
+    logger->SetLogVerbosityLevel("low");
+    logger->SetLogScreenLevel("warn");
     logger->SetColoredLog(true);
 
     // System paths
@@ -44,10 +49,26 @@ void runsim(Int_t nEvents = 10)
     // Input GLAD geometry
     const TString fGladGeo = "glad_v2025.1.geo.root";
 
+    // ---------------------------------------------------------------------
+    // Inputs for the custom generator R3BTheoreticalSPOMomdisGenerator
+    // ---------------------------------------------------------------------
+    // Adjust these three paths to point to your input files.
+    const TString fPMom3DFile = "inputs/momentum3d.root";     // TH3 "h3_pxpypz" [GeV/c]
+    const TString fVertexFile = "inputs/reaction_point.root"; // TH2 "hVertexXY" [cm]
+    const TString fBetaFile = "inputs/beta_dist.root";        // TH1 "h"        [unitless]
+
+    // Fragment to generate (defaults: 24O, fully stripped)
+    const Int_t fFragZ = 8;
+    const Int_t fFragA = 24;
+    const Int_t fFragQ = 8;
+
+    // Target half-thickness in z (cm). 5 cm target -> 2.5 cm.
+    const Double_t fTargetHalfZ = 2.5;
+
     // Basic simulation setup
     auto run = std::make_unique<FairRunSim>();
     run->SetName("TGeant4");
-    run->SetStoreTraj(true);
+    run->SetStoreTraj(false);
     run->SetMaterials("media_r3b.geo");
 
     auto config = std::make_unique<FairGenericVMCConfig>();
@@ -59,12 +80,84 @@ void runsim(Int_t nEvents = 10)
     UInt_t runId = 1;
     rtdb->initContainers(runId);
 
+    // ---------------------------------------------------------------------
     // Primary particle generator
-    // auto ionGen = std::make_unique<FairIonGenerator>(9, 25, 9, 1, 0., 0., 1.371, 0., 0., 0.);
-    auto ionGen = std::make_unique<FairIonGenerator>(8, 24, 8, 1, 0., 0., 1.2516, 0., 0., 0.);
+    // ---------------------------------------------------------------------
+    // Open the three input files and read the histograms. The TFile objects
+    // are kept on the heap (not closed) because the generator stores raw
+    // TH* pointers and calls GetRandom*() on them throughout the run.
+    auto *fPMom = TFile::Open(fPMom3DFile, "READ");
+    if (!fPMom || fPMom->IsZombie())
+    {
+        std::cerr << "ERROR: cannot open momentum file " << fPMom3DFile << std::endl;
+        gApplication->Terminate();
+    }
+    auto *h3_pxpypz = dynamic_cast<TH3 *>(fPMom->Get("h3_pxpypz"));
+    if (!h3_pxpypz)
+    {
+        std::cerr << "ERROR: TH3 'h3_pxpypz' not found in " << fPMom3DFile << std::endl;
+        gApplication->Terminate();
+    }
+    h3_pxpypz->SetDirectory(nullptr); // decouple from the file
+
+    auto *fVertex = TFile::Open(fVertexFile, "READ");
+    if (!fVertex || fVertex->IsZombie())
+    {
+        std::cerr << "ERROR: cannot open vertex file " << fVertexFile << std::endl;
+        gApplication->Terminate();
+    }
+    auto *hVertexXY = dynamic_cast<TH2 *>(fVertex->Get("hVertexXY"));
+    if (!hVertexXY)
+    {
+        std::cerr << "ERROR: TH2 'hVertexXY' not found in " << fVertexFile << std::endl;
+        gApplication->Terminate();
+    }
+    hVertexXY->SetDirectory(nullptr);
+
+    auto *fBeta = TFile::Open(fBetaFile, "READ");
+    if (!fBeta || fBeta->IsZombie())
+    {
+        std::cerr << "ERROR: cannot open beta file " << fBetaFile << std::endl;
+        gApplication->Terminate();
+    }
+    auto *hBeta = dynamic_cast<TH1 *>(fBeta->Get("h"));
+    if (!hBeta)
+    {
+        std::cerr << "ERROR: TH1 'h' not found in " << fBetaFile << std::endl;
+        gApplication->Terminate();
+    }
+    hBeta->SetDirectory(nullptr);
+
+    // We can safely close the input files now: histograms are detached.
+    fPMom->Close();
+    fVertex->Close();
+    fBeta->Close();
+
+    // Build and configure the generator.
+    // The name passed to the named constructor is used as the prefix for the
+    // truth side branches: "SPO_BetaParent", "SPO_PxRest", "SPO_PyRest",
+    // "SPO_PzRest" (all Double_t, GeV/c for the rest-frame momentum).
+    auto *spoGen = new R3BTheoreticalSPOMomdisGenerator("SPO");
+    spoGen->SetIon(fFragZ, fFragA, fFragQ); // 24O (or change above)
+    spoGen->SetRestMomentumHist3D(h3_pxpypz);
+    spoGen->SetRestMomentumUnitMeV(); // TH3 axes are in MeV/c
+    spoGen->SetParentBetaHist(hBeta);
+    spoGen->SetBeamSpotHistXY(hVertexXY);
+    spoGen->SetTargetHalfThicknessZ(fTargetHalfZ);
+    spoGen->SetTargetCenter(0., 0., 0.);
+    spoGen->EnableTruthOutput(kTRUE);              // default; shown for clarity
+    spoGen->SetTruthOutputFile("glad.truth.root"); // sits next to glad.simu.root
+
     auto primGen = std::make_unique<FairPrimaryGenerator>();
-    primGen->AddGenerator(ionGen.release());
+    primGen->AddGenerator(spoGen); // ownership transferred
     run->SetGenerator(primGen.release());
+
+    // Register the fragment ion in the PDG database. This MUST happen
+    // before run->Init(), otherwise Geant4-VMC builds its particle table
+    // without the ion and FairPrimaryGenerator drops every primary with
+    // "PDG code <N> not found in database".
+    run->AddNewIon(new FairIon(Form("Ion_Z%d_A%d", fFragZ, fFragA),
+                               fFragZ, fFragA, fFragQ));
 
     // Geometry: Cave
     auto cave = std::make_unique<R3BCave>("CAVE");
@@ -164,4 +257,9 @@ void runsim(Int_t nEvents = 10)
     timer.Stop();
     std::cout << "Real time: " << timer.RealTime() << "s, CPU time: " << timer.CpuTime() << "s" << std::endl;
     std::cout << "Macro finished successfully." << std::endl;
+
+    // Clean up the detached histograms (optional; process is about to exit).
+    delete h3_pxpypz;
+    delete hVertexXY;
+    delete hBeta;
 }
