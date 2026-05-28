@@ -452,7 +452,10 @@ static Top2Clusters findTop2Clusters(TClonesArray &clu,
                 return c;
 
         double dphiDeg = std::abs(TVector2::Phi_mpi_pi(c.ph2 - c.ph1)) * TMath::RadToDeg();
-        if (std::abs(dphiDeg - 180.0) > 30.0)
+        // if (std::abs(dphiDeg - 180.0) > 30.0)
+        //         return c;
+
+        if (std::abs(dphiDeg - 180.0) > 60.0)
                 return c;
 
         c.good = true;
@@ -641,7 +644,7 @@ void eventFilter(std::string setting = "",
                 return;
         }
 
-        std::string outFileName = cfg.outName + (test ? "_test" : "") + ".root";
+        std::string outFileName = cfg.outName + (test ? "_test_60opa" : "") + ".root";
         double M_FRAG_GeV = cfg.massAMU * AMU_GeV;
 
         // ── Open output file ────────────────────────────────────────────────
