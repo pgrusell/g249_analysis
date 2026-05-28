@@ -15,6 +15,7 @@ struct MomentaDist
 
 // ---------------------------------------------------------------------------
 // Read a theoretical momentum distribution from a two-column text file.
+// (LEGACY format: Qi  Qt). Extracts the transverse component into .Qt
 // ---------------------------------------------------------------------------
 MomentaDist getMomentaDistFromtxt(std::string txtFile, std::string histName)
 {
@@ -49,6 +50,80 @@ MomentaDist getMomentaDistFromtxt(std::string txtFile, std::string histName)
 }
 
 // ---------------------------------------------------------------------------
+// Read a theoretical momentum distribution from a MULTI-COLUMN text file
+// (the "JT 5-column" format):
+//
+//   <total cross section>
+//   <blank line(s)>
+//   Momentum distributions
+//     Q_i      dS/dQ_z   dS/dQ_t   dS/dQ_y   dS/dQ
+//   (MeV/C)  (mb/MeV/c) (mb/MeV/c) (mb/MeV/c) (mb/MeV/c)
+//   -986.635   0.00000  0.95E-05  0.17E-06  0.24E-05
+//   ...
+//
+// Column layout:  Q_i  dS/dQ_z  dS/dQ_t  dS/dQ_y  dS/dQ
+//
+// For this format the fit (both px and py) is performed against the
+// dS/dQ_y column (4th column). We store that distribution in the .Qt
+// slot of MomentaDist, because that is the field the downstream code
+// (buildTemplate / create_pdf_from_histogram) reads from. The slot name
+// is historical; the *content* here is dS/dQ_y.
+// ---------------------------------------------------------------------------
+MomentaDist getMomentaDistFromtxtMultiCol(std::string txtFile, std::string histName)
+{
+    MomentaDist momdis;
+    std::vector<double> Qi, Qy;
+    std::ifstream f(txtFile.c_str());
+    if (!f.is_open())
+    {
+        std::cerr << "[getMomentaDistFromtxtMultiCol] Cannot open " << txtFile << "\n";
+        return momdis;
+    }
+    std::string s;
+
+    while (getline(f, s))
+    {
+        std::istringstream ss(s);
+        double qi, qz, qt, qy, q;
+        // A valid data line must parse as exactly 5 doubles.
+        // Header / label / units / blank lines fail this and are skipped.
+        if (!(ss >> qi >> qz >> qt >> qy >> q))
+            continue;
+        Qi.push_back(qi);
+        Qy.push_back(qy); // dS/dQ_y -> used for BOTH px and py fits
+    }
+
+    const int nBins = Qi.size();
+    if (nBins < 2)
+    {
+        std::cerr << "[getMomentaDistFromtxtMultiCol] Not enough points in "
+                  << txtFile << "\n";
+        return momdis;
+    }
+    const double maxBin = Qi[nBins - 1] + (Qi[1] - Qi[0]) / 2.;
+    // Stored in .Qt so downstream code is unchanged, but content is dS/dQ_y.
+    momdis.Qt = new TH1F((std::string("Qy") + histName).c_str(), "Qy",
+                         nBins, -maxBin, maxBin);
+    for (int i = 0; i < nBins; i++)
+        momdis.Qt->SetBinContent(i + 1, Qy[i]);
+
+    return momdis;
+}
+
+// ---------------------------------------------------------------------------
+// Dispatcher: pick the reader based on a format flag.
+//   format == 0  ->  two-column  (legacy: Qi Qt)             -> extracts Qt
+//   format == 1  ->  multi-column (JT 5-col)                 -> extracts Qy
+// In both cases the chosen distribution is returned in momdis.Qt.
+// ---------------------------------------------------------------------------
+MomentaDist getMomentaDist(std::string txtFile, std::string histName, int format)
+{
+    if (format == 1)
+        return getMomentaDistFromtxtMultiCol(txtFile, histName);
+    return getMomentaDistFromtxt(txtFile, histName); // default: legacy
+}
+
+// ---------------------------------------------------------------------------
 // Read px_rf_rot or py_rf_rot from the experimental tree.
 // ---------------------------------------------------------------------------
 TH1F *getMomentaDistFromRoot(std::string rootFile, std::string branch,
@@ -74,7 +149,13 @@ TH1F *getMomentaDistFromRoot(std::string rootFile, std::string branch,
     tr->SetBranchAddress("califa_opa", &opa);
 
     const double opamin = 1.3;
-    const double opamax = 1.6;
+    const double opamax = 1.62;
+
+    // const double opamin = 0.;
+    // const double opamax = 3;
+
+    // const double opamin = 1.38;
+    // const double opamax = 1.54;
 
     double sum = 0.0;
     Long64_t n = 0;
@@ -612,8 +693,11 @@ void drawBootstrapCanvas(const std::string &cName, const std::string &cTitle,
 // uncertainty with the truth-resampling distribution. Useful to verify
 // that the bootstrap correctly reproduces the spread expected from
 // independent realizations of the true model.
+//
+// 'theoFormat' selects the theory-file reader (0 = legacy 2-col / Qt,
+//              1 = JT multi-col / Qy).
 // ===========================================================================
-void test()
+void test(int theoFormat = 0)
 {
     RooMsgService::instance().setGlobalKillBelow(RooFit::ERROR);
 
@@ -645,7 +729,7 @@ void test()
     std::vector<RooHistPdf *> theory(nC);
     for (int k = 0; k < nC; k++)
     {
-        auto md = getMomentaDistFromtxt(inFilesTheo[k], Form("theo_%d", k));
+        auto md = getMomentaDist(inFilesTheo[k], Form("theo_%d", k), theoFormat);
         templates[k] = buildTemplate(md.Qt, hRef, Form("tmpl_%d", k));
         theory[k] = create_pdf_from_histogram(x, templates[k]);
     }
@@ -760,15 +844,20 @@ void test()
 }
 
 // ===========================================================================
-// 2) fitMomdisBootstrap(): real-data analysis
+// 2) fitMomdis(): real-data analysis
 //
 // Reads px_rf_rot and py_rf_rot from the experimental ROOT file, fits each
-// to the three theoretical templates, and obtains asymmetric uncertainties
+// to the theoretical templates, and obtains asymmetric uncertainties
 // from a Poisson bootstrap of the observed histogram. Also computes the
 // analytic chi2 and draws residuals.
+//
+// 'theoFormat' selects the theory-file reader:
+//   0 = legacy two-column  (Qi Qt)        -> uses the Qt column
+//   1 = JT multi-column    (Qi Qz Qt Qy Q)-> uses the Qy column for
+//                                            BOTH the px and py fits
 // ===========================================================================
 void fitMomdis(double erelMin = -1, double erelMax = -1,
-               int nToys = 1000)
+               int nToys = 1000, int theoFormat = 1)
 {
     using namespace RooFit;
     RooMsgService::instance().setGlobalKillBelow(RooFit::ERROR);
@@ -776,18 +865,25 @@ void fitMomdis(double erelMin = -1, double erelMax = -1,
     // ---------------------------------------------------------------------
     // Inputs
     // ---------------------------------------------------------------------
+    // std::vector<std::string> inFilesTheo = {
+    //     "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_d52-gs.txt",
+    //     "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_s12-gs.txt"};
+
     std::vector<std::string> inFilesTheo = {
         "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_d52-gs.txt",
-        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_s12-gs.txt",
-        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_p12-gs.txt"};
+        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_s12-gs.txt"};
+
     std::vector<std::string> labels = {"1d_{5/2}", "1s_{1/2}", "1p_{1/2}"};
     std::vector<int> colors = {kBlue, kGreen + 2, kMagenta, kCyan + 1};
 
+    // std::string inFileExp =
+    //     "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/24O_analyzed_test.root";
+
     std::string inFileExp =
-        "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/24O_analyzed_test.root";
+        "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/24O_analyzed_opa60.root";
 
     const int nC = (int)inFilesTheo.size();
-    const int nBinsRef = 40;
+    const int nBinsRef = 30;
     const double maxBin = 300.0;
     const bool useErelCut = !(erelMin < 0 && erelMax < 0);
 
@@ -802,7 +898,9 @@ void fitMomdis(double erelMin = -1, double erelMax = -1,
                                         "h_exp_py");
 
     // ---------------------------------------------------------------------
-    // Templates on the experimental binning
+    // Templates on the experimental binning.
+    // For theoFormat==1 the reader returns the dS/dQ_y column (in .Qt),
+    // which is used as the template for BOTH the px and py fits.
     // ---------------------------------------------------------------------
     RooRealVar x("x", "p [MeV/c]", -maxBin, maxBin);
 
@@ -810,7 +908,7 @@ void fitMomdis(double erelMin = -1, double erelMax = -1,
     std::vector<RooHistPdf *> theory(nC);
     for (int k = 0; k < nC; k++)
     {
-        auto md = getMomentaDistFromtxt(inFilesTheo[k], Form("theo_%d", k));
+        auto md = getMomentaDist(inFilesTheo[k], Form("theo_%d", k), theoFormat);
         templates[k] = buildTemplate(md.Qt, h_px, Form("tmpl_%d", k));
         theory[k] = create_pdf_from_histogram(x, templates[k]);
     }

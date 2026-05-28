@@ -25,7 +25,7 @@
  **
  **/
 
-void runsim(Int_t nEvents = 100000)
+void runsim(Int_t nEvents = 1000000)
 {
     // Timer
     TStopwatch timer;
