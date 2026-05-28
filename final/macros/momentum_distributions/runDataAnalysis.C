@@ -12,7 +12,7 @@ void runDataAnalysis(TString mode = "ana23")
 
     if (mode == "ana24")
     {
-        auto *da = new DataAnalysis("/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/data_24O_test.root", "24O_analyzed_test.root", false);
+        auto *da = new DataAnalysis("/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/data_24O_test_opa60.root", "24O_analyzed_opa60.root", false);
         // da->setOffsetsFromTxt("23O1n.txt");
         da->getData();
     }

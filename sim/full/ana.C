@@ -101,10 +101,15 @@ static constexpr Int_t kFragA = 24;
 static const Double_t kFragMass = static_cast<Double_t>(kFragA) * kAMU; // GeV/c^2
 
 // Smearing values (from the user request)
-static constexpr Double_t kSigmaFootPos = 75.e-4;   // 75 um  -> cm
-static constexpr Double_t kSigmaFiberPos = 150.e-4; // 150 um -> cm
-static constexpr Double_t kSigmaTofdPos = 150.e-4;  // 150 um -> cm
-static constexpr Double_t kSigmaTofdCharge = 0.2;   // absolute Z units
+// static constexpr Double_t kSigmaFootPos = 75.e-4;   // 75 um  -> cm
+// static constexpr Double_t kSigmaFiberPos = 150.e-4; // 150 um -> cm
+// static constexpr Double_t kSigmaTofdPos = 1;  // 150 um -> cm
+// static constexpr Double_t kSigmaTofdCharge = 0.2;   // absolute Z units
+
+static constexpr Double_t kSigmaFootPos = 75.e-4;    // 75 um  -> cm
+static constexpr Double_t kSigmaFiberPos = 1000.e-4; // 150 um -> cm
+static constexpr Double_t kSigmaTofdPos = 1;         // 150 um -> cm
+static constexpr Double_t kSigmaTofdCharge = 0.5;    // absolute Z units
 
 // GLAD currents (must match the experimental analysis exactly so that the
 // MDF rescaling reproduces the experiment)
@@ -300,6 +305,26 @@ void ana(const char *simFile = "glad.simu.root",
     // TofD MC points
     TTreeReaderArray<Double32_t> tdEloss(rdr, "TofDPoint.fELoss");
 
+    // ---- TraPoint: FOOT-equivalent target trackers in this simulation -----
+    // The simulation has 4 detector planes inside R3BTra (branch "TraPoint"):
+    //   DetId 5 (z ~ 22.5 cm) : measures Y
+    //   DetId 6 (z ~ 23.9 cm) : measures X
+    //   DetId 7 (z ~ 96.0 cm) : measures Y
+    //   DetId 8 (z ~ 99.0 cm) : measures X
+    // For each detector we pick the highest-ELoss hit, smear the *measured*
+    // coordinate (Y for 5/7, X for 6/8) by the FOOT resolution (75 um), and
+    // reconstruct the outgoing-track slopes and intercept exactly as in
+    // R3BFootHit2Track::MakeParticle:
+    //   tx = (X8 - X6) / (Z8 - Z6)
+    //   ty = (Y7 - Y5) / (Z7 - Z5)
+    //   vx_target = X6 - tx*Z6   (extrapolate to the target z=0 plane)
+    //   vy_target = Y5 - ty*Z5
+    TTreeReaderArray<Double32_t> trX(rdr, "TraPoint.fX");
+    TTreeReaderArray<Double32_t> trY(rdr, "TraPoint.fY");
+    TTreeReaderArray<Double32_t> trZ(rdr, "TraPoint.fZ");
+    TTreeReaderArray<Double32_t> trE(rdr, "TraPoint.fELoss");
+    TTreeReaderArray<Int_t> trDet(rdr, "TraPoint.fDetectorID");
+
     // ---- MCTrack via TClonesArray (avoids the fCoordinates.fX ambiguity) ---
     // We attach the MCTrack branch to a TClonesArray and read it through
     // R3BMCTrack accessors. We construct the TCA with a nullptr first and
@@ -391,6 +416,7 @@ void ana(const char *simFile = "glad.simu.root",
     // a zero-yield run without binary searching the macro.
     Long64_t nProcessed = 0;
     Long64_t nNoPrimary = 0;
+    Long64_t nFootMiss = 0;
     Long64_t nFiberMiss = 0;
     Long64_t nBadPoQ = 0;
     Long64_t nNoTofd = 0;
@@ -411,7 +437,8 @@ void ana(const char *simFile = "glad.simu.root",
                                   ? tSim->GetEntries()
                                   : std::min<Long64_t>(maxEvents, tSim->GetEntries());
 
-    std::cout << "[run_sim_analysis] Processing " << nEntries << " events\n";
+    std::cout
+        << "[run_sim_analysis] Processing " << nEntries << " events\n";
 
     Long64_t iEv = -1;
     while (rdr.Next())
@@ -442,6 +469,7 @@ void ana(const char *simFile = "glad.simu.root",
         {
             std::cout << "  [diag] ev=" << iEv
                       << "  MCTrack=" << nMC
+                      << "  TraPoint=" << trX.GetSize()
                       << "  Fi32=" << f32x.GetSize()
                       << "  Fi30=" << f30x.GetSize()
                       << "  Fi33=" << f33x.GetSize()
@@ -536,30 +564,86 @@ void ana(const char *simFile = "glad.simu.root",
         const Double_t pz_true = mcPrim->GetPz();
         const Double_t p_true = std::sqrt(px_true * px_true + py_true * py_true + pz_true * pz_true);
 
-        // -------- Build a "FOOT-equivalent" outgoing track ------------------
-        // The experiment's MDF uses (x,y,z,tx,ty) at the target as the seed
-        // (these come from the FOOT tracker, which we don't simulate here).
-        // We smear the true vertex (x,y) and direction (tx,ty) with the FOOT
-        // position resolution, treating it as a 4-point straight track.
+        // -------- Build the FOOT-equivalent outgoing track ------------------
+        // We reconstruct (vx,vy,vz,tx,ty) at the target from the 4 TraPoint
+        // planes (DetId 5,6,7,8), exactly as R3BFootHit2Track::MakeParticle
+        // does on real data. For each detector, take the highest-ELoss point,
+        // smear the *measured* coordinate by sigma_FOOT = 75 um (Y for 5/7,
+        // X for 6/8), then:
+        //   tx = (X8 - X6) / (Z8 - Z6),  ty = (Y7 - Y5) / (Z7 - Z5)
+        //   vx_target = X6 - tx*Z6      (extrapolate to z=0)
+        //   vy_target = Y5 - ty*Z5
         //
-        // For a 4-strip FOOT layout with sigma_pos = 75 um and roughly L_FOOT
-        // baseline, the angular resolution would be sigma_pos*sqrt(2)/L.
-        // Without a concrete FOOT geometry in the sim we adopt the simpler,
-        // physically motivated choice: position smeared by 75 um, slope
-        // smeared by 75 um / L_baseline. We take L_baseline = 30 cm as a
-        // representative FOOT footprint (override below if you know better).
-        constexpr Double_t kFootBaseline = 30.; // cm, FOOT footprint
-        const Double_t sigma_tx = kSigmaFootPos / kFootBaseline;
-        const Double_t sigma_ty = kSigmaFootPos / kFootBaseline;
+        // The MDF was trained on the FOOT seed at the target; we pass vz=0
+        // (target center) as start_Z, consistent with the experiment, where
+        // the FOOT extrapolation reports z=0 at the nominal target plane.
+        struct FootHit
+        {
+            bool ok = false;
+            Double_t pos = 0., z = 0., eloss = -1.;
+        };
+        FootHit h5, h6, h7, h8; // 5,7 -> Y measurement; 6,8 -> X measurement
+        const Int_t nTra = trX.GetSize();
+        for (Int_t i = 0; i < nTra; ++i)
+        {
+            const Int_t did = trDet[i];
+            if (did < 5 || did > 8)
+                continue;
+            FootHit *h = nullptr;
+            Double_t measured = 0.;
+            switch (did)
+            {
+            case 5:
+                h = &h5;
+                measured = trY[i];
+                break; // Y
+            case 6:
+                h = &h6;
+                measured = trX[i];
+                break; // X
+            case 7:
+                h = &h7;
+                measured = trY[i];
+                break; // Y
+            case 8:
+                h = &h8;
+                measured = trX[i];
+                break; // X
+            }
+            if (trE[i] > h->eloss)
+            {
+                h->ok = true;
+                h->pos = measured;
+                h->z = trZ[i];
+                h->eloss = trE[i];
+            }
+        }
+        if (!(h5.ok && h6.ok && h7.ok && h8.ok))
+        {
+            ++nFootMiss;
+            continue;
+        }
 
-        Double_t vx_smear = vx_true + gRandom->Gaus(0., kSigmaFootPos);
-        Double_t vy_smear = vy_true + gRandom->Gaus(0., kSigmaFootPos);
-        Double_t vz_smear = vz_true; // FOOT extrapolated to target z
+        // Smear the four measured coordinates (Gaussian, sigma = 75 um).
+        const Double_t Y5 = h5.pos + gRandom->Gaus(0., kSigmaFootPos);
+        const Double_t X6 = h6.pos + gRandom->Gaus(0., kSigmaFootPos);
+        const Double_t Y7 = h7.pos + gRandom->Gaus(0., kSigmaFootPos);
+        const Double_t X8 = h8.pos + gRandom->Gaus(0., kSigmaFootPos);
+        const Double_t Z5 = h5.z, Z6 = h6.z, Z7 = h7.z, Z8 = h8.z;
 
-        Double_t tx_true = px_true / pz_true;
-        Double_t ty_true = py_true / pz_true;
-        Double_t tx_smear = tx_true + gRandom->Gaus(0., sigma_tx);
-        Double_t ty_smear = ty_true + gRandom->Gaus(0., sigma_ty);
+        // Straight-line slopes
+        const Double_t tx_smear = (X8 - X6) / (Z8 - Z6);
+        const Double_t ty_smear = (Y7 - Y5) / (Z7 - Z5);
+        // Vertex at z=0 (target center, matches the experiment convention)
+        const Double_t vx_smear = X6 - tx_smear * Z6;
+        const Double_t vy_smear = Y5 - ty_smear * Z5;
+        const Double_t vz_smear = 0.;
+
+        // Keep an MC-truth slope handy for diagnostics
+        const Double_t tx_true = px_true / pz_true;
+        const Double_t ty_true = py_true / pz_true;
+        (void)tx_true;
+        (void)ty_true; // currently unused, kept for debugging
 
         // -------- Fiber hits: highest-eloss point, smear local coord -------
         FiberLabHit f32 = PickMaxElossHit(f32x, f32y, f32z, f32e);
@@ -877,6 +961,7 @@ void ana(const char *simFile = "glad.simu.root",
               << "  primary by fallback   : " << nPrimaryByFallback << "\n"
               << "  -- gates that vetoed events --\n"
               << "  no primary fragment   : " << nNoPrimary << "\n"
+              << "  FOOT multiplicity     : " << nFootMiss << "\n"
               << "  fiber multiplicity    : " << nFiberMiss << "\n"
               << "  MDF returned bad PoQ  : " << nBadPoQ << "\n"
               << "  bad parent beta       : " << nBadBeta << "\n"
