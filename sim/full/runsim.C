@@ -53,7 +53,7 @@ void runsim(Int_t nEvents = 1000000)
     // Inputs for the custom generator R3BTheoreticalSPOMomdisGenerator
     // ---------------------------------------------------------------------
     // Adjust these three paths to point to your input files.
-    const TString fPMom3DFile = "inputs/momentum3d.root";     // TH3 "h3_pxpypz" [GeV/c]
+    const TString fPMom3DFile = "inputs/momentum3d_d52.root";     // TH3 "h3_pxpypz" [GeV/c]
     const TString fVertexFile = "inputs/reaction_point.root"; // TH2 "hVertexXY" [cm]
     const TString fBetaFile = "inputs/beta_dist.root";        // TH1 "h"        [unitless]
 

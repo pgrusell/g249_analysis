@@ -89,9 +89,9 @@ TH1D *MakeProfileHist(const char *name, const char *title,
     return h;
 }
 
-void build_momentum_3d(const char *sigtFile = "sigt.txt",
-                       const char *siglFile = "sigl.txt",
-                       const char *outFile = "momentum3d.root")
+void build_momentum_3d(const char *sigtFile = "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_d52-gs.txt",
+                       const char *siglFile = "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigl_d52-gs.txt",
+                       const char *outFile = "momentum3d_d52.root")
 {
     // 1. Read the two input files.
     std::vector<double> pT, fT, pL, fL;
