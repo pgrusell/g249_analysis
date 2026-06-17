@@ -29,6 +29,13 @@ static constexpr double C_CM_PER_NS = 29.9792458;
 static constexpr double FIB33_OFF = 25.;
 static constexpr double FIB31_OFF = -25.;
 
+// ─── CALIFA gamma-cluster selection (lab-frame cluster energies, keV) ───────
+// Lower bound: matches the experimental gamma-cluster threshold : 100 keV
+// Upper bound: the proton-cluster threshold already used in this macro : 20e3 keV 
+ 
+static constexpr double CALIFA_GAMMA_EMIN = 100.;   // keV
+static constexpr double CALIFA_GAMMA_EMAX = 20.e3;  // keV
+
 // ─── 25F incoming graphical cut (polygon from TCutG) ────────────────────────
 static const std::vector<std::pair<double, double>> INCOMING_25F_POLYGON = {
     {2.77227, 8.55258},
@@ -88,6 +95,15 @@ struct Top2Clusters
 {
         double e1, th1, ph1, e2, th2, ph2;
         bool good;
+};
+
+/// CALIFA gamma-cluster collection (all clusters in the gamma energy band).
+/// Parallel vectors, one entry per gamma cluster, in keV / rad.
+struct GammaClusters
+{
+        std::vector<double> e;     // cluster energy   [keV] (lab frame)
+        std::vector<double> theta; // cluster centroid theta [rad]
+        std::vector<double> phi;   // cluster centroid phi   [rad]
 };
 
 // ─── Free helpers ───────────────────────────────────────────────────────────
@@ -459,6 +475,25 @@ static Top2Clusters findTop2Clusters(TClonesArray &clu,
         return c;
 }
 
+/// Collect all CALIFA clusters in the gamma energy band into parallel vectors.
+static GammaClusters collectGammaClusters(TClonesArray &clu,
+                                          double Emin = CALIFA_GAMMA_EMIN,
+                                          double Emax = CALIFA_GAMMA_EMAX)
+{
+        GammaClusters g;
+        for (int i = 0; i < clu.GetEntriesFast(); ++i)
+        {
+                auto *hit = (R3BCalifaClusterData *)clu.UncheckedAt(i);
+                double E = hit->GetEnergy();
+                if (E < Emin || E >= Emax)
+                        continue;
+                g.e.push_back(E);
+                g.theta.push_back(hit->GetTheta());
+                g.phi.push_back(hit->GetPhi());
+        }
+        return g;
+}
+
 static ROOT::RDF::RNode defineCalifaColumns(ROOT::RDF::RNode node)
 {
         node = node
@@ -483,6 +518,20 @@ static ROOT::RDF::RNode defineCalifaColumns(ROOT::RDF::RNode node)
                            { return (!c.good) ? -999.0 : (sw ? c.th1 : c.th2); }, {"califa_swap", "califa_top2"})
                    .Define("califa_phi_R", [](bool sw, const Top2Clusters &c)
                            { return (!c.good) ? -999.0 : (sw ? c.ph1 : c.ph2); }, {"califa_swap", "califa_top2"});
+
+        // ── Gamma clusters (stored only if "good CALIFA event")──────────
+        node = node
+                   .Define("califa_gamma", [](TClonesArray &clu)
+                           { return collectGammaClusters(clu); },
+                           {"CalifaClusterData"})
+                   .Define("califa_gamma_E", [](const GammaClusters &g)
+                           { return g.e; }, {"califa_gamma"})
+                   .Define("califa_gamma_theta", [](const GammaClusters &g)
+                           { return g.theta; }, {"califa_gamma"})
+                   .Define("califa_gamma_phi", [](const GammaClusters &g)
+                           { return g.phi; }, {"califa_gamma"})
+                   .Define("califa_gamma_mult", [](const GammaClusters &g)
+                           { return (int)g.e.size(); }, {"califa_gamma"});
 
         return node.Filter([](double opa)
                            { return opa > -990.0; },
@@ -581,6 +630,8 @@ static std::vector<std::string> buildOutputColumns(bool hasNeutrons)
         cols.insert(cols.end(), {"califa_opa",
                                  "califa_theta_L", "califa_phi_L",
                                  "califa_theta_R", "califa_phi_R",
+                                 "califa_gamma_E", "califa_gamma_theta",
+                                 "califa_gamma_phi", "califa_gamma_mult",
                                  "px_frag", "py_frag", "pz_frag",
                                  "beta_proj"});
 
