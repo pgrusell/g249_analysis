@@ -88,6 +88,16 @@ struct ReactionConfig
         double ell_mu_Z = 0;
         double ell_sig_Z = 0;
         double ell_k = 0;
+
+        // Optional elliptical incoming-PID cut.
+        // When false, the incoming selection falls back to the default 25F
+        // graphical-cut polygon (INCOMING_25F_POLYGON / isGoodIncoming).
+        bool useIncomingEllipse = false;
+        double in_mu_AoQ = 0;
+        double in_sig_AoQ = 0;
+        double in_mu_Z = 0;
+        double in_sig_Z = 0;
+        double in_k = 0;
 };
 
 /// CALIFA top-2 cluster result
@@ -217,6 +227,22 @@ static ReactionConfig makeReactionConfig(const TString &reaction)
                        24.019861000 - 8 * 0.00511,
                        "data_25Fp2p", false, false};
         }
+        else if (reaction == "23F22O")
+        {
+                // only the INCOMING species
+                // differs, so it is gated by an incoming 23F ellipse below.
+                cfg = {2.67, 2.755,
+                       22.009965744 - 8.0 * 0.00511,
+                       "data_23Fp2p22O", false, false};
+
+                // Incoming 23F gate (AoQ-Z plane):
+                cfg.useIncomingEllipse = true;
+                cfg.in_mu_AoQ = 2.666;
+                cfg.in_sig_AoQ = 0.002396;
+                cfg.in_mu_Z = 8.986;
+                cfg.in_sig_Z = 0.2862;
+                cfg.in_k = 3.;
+        }
         else if (reaction == "25F25F")
         {
                 cfg = {2.71, 2.77,
@@ -230,9 +256,15 @@ static ReactionConfig makeReactionConfig(const TString &reaction)
 
 // ─── Reusable RDataFrame column builders ────────────────────────────────────
 
-/// FRS incoming columns + filter (now uses graphical cut polygon)
-static ROOT::RDF::RNode defineFrsIncoming(ROOT::RDF::RNode node)
+/// FRS incoming columns + filter.
+/// Default: 25F graphical-cut polygon. If cfg.useIncomingEllipse is set, an
+/// axis-aligned ellipse in the (AoQ, Z) plane is used instead (e.g. for 23F).
+static ROOT::RDF::RNode defineFrsIncoming(ROOT::RDF::RNode node, const ReactionConfig &cfg)
 {
+        const bool useEll = cfg.useIncomingEllipse;
+        const double mA = cfg.in_mu_AoQ, sA = cfg.in_sig_AoQ;
+        const double mZ = cfg.in_mu_Z, sZ = cfg.in_sig_Z, kk = cfg.in_k;
+
         return node
             .Define("in_AoQ", [](TClonesArray &f)
                     { return ((R3BFrsData *)f.UncheckedAt(0))->GetAq(); }, {"FrsData"})
@@ -240,9 +272,11 @@ static ROOT::RDF::RNode defineFrsIncoming(ROOT::RDF::RNode node)
                     { return ((R3BFrsData *)f.UncheckedAt(0))->GetZ(); }, {"FrsData"})
             .Define("beta_proj", [](TClonesArray &f)
                     { return ((R3BFrsData *)f.UncheckedAt(0))->GetBeta(); }, {"FrsData"})
-            .Filter([](double aoq, double z)
-                    { return isGoodIncoming(aoq, z); },
-                    {"in_AoQ", "in_Z"}, "incoming 25F graphical cut");
+            .Filter([=](double aoq, double z)
+                    {
+                            if (useEll)
+                                    return insideEllipse(aoq, z, mA, sA, mZ, sZ, kk);
+                            return isGoodIncoming(aoq, z); }, {"in_AoQ", "in_Z"}, "incoming PID cut");
 }
 
 /// Outgoing fragment PID from MDF
@@ -725,7 +759,7 @@ void eventFilter(std::string setting = "",
                                        {"NeulandHits"});
 
         // ── FRS incoming (graphical cut) + fragment PID ─────────────────────
-        auto df_frs = defineFrsIncoming(df_cut);
+        auto df_frs = defineFrsIncoming(df_cut, cfg);
         auto df_frag = defineFragmentPID(df_frs);
 
         // ═════════════════  UNREACTED 25F PATH  ══════════════════════════════
