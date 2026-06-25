@@ -256,27 +256,30 @@ static ReactionConfig makeReactionConfig(const TString &reaction)
 
 // ─── Reusable RDataFrame column builders ────────────────────────────────────
 
-/// FRS incoming columns + filter.
-/// Default: 25F graphical-cut polygon. If cfg.useIncomingEllipse is set, an
-/// axis-aligned ellipse in the (AoQ, Z) plane is used instead (e.g. for 23F).
-static ROOT::RDF::RNode defineFrsIncoming(ROOT::RDF::RNode node, const ReactionConfig &cfg)
+/// FRS incoming columns (no filter — call applyFrsIncomingFilter separately).
+static ROOT::RDF::RNode defineFrsColumns(ROOT::RDF::RNode node)
 {
-        const bool useEll = cfg.useIncomingEllipse;
-        const double mA = cfg.in_mu_AoQ, sA = cfg.in_sig_AoQ;
-        const double mZ = cfg.in_mu_Z, sZ = cfg.in_sig_Z, kk = cfg.in_k;
-
         return node
             .Define("in_AoQ", [](TClonesArray &f)
                     { return ((R3BFrsData *)f.UncheckedAt(0))->GetAq(); }, {"FrsData"})
             .Define("in_Z", [](TClonesArray &f)
                     { return ((R3BFrsData *)f.UncheckedAt(0))->GetZ(); }, {"FrsData"})
             .Define("beta_proj", [](TClonesArray &f)
-                    { return ((R3BFrsData *)f.UncheckedAt(0))->GetBeta(); }, {"FrsData"})
-            .Filter([=](double aoq, double z)
-                    {
-                            if (useEll)
-                                    return insideEllipse(aoq, z, mA, sA, mZ, sZ, kk);
-                            return isGoodIncoming(aoq, z); }, {"in_AoQ", "in_Z"}, "incoming PID cut");
+                    { return ((R3BFrsData *)f.UncheckedAt(0))->GetBeta(); }, {"FrsData"});
+}
+
+/// Incoming PID filter (polygon or ellipse depending on cfg).
+static ROOT::RDF::RNode applyFrsIncomingFilter(ROOT::RDF::RNode node, const ReactionConfig &cfg)
+{
+        const bool useEll = cfg.useIncomingEllipse;
+        const double mA = cfg.in_mu_AoQ, sA = cfg.in_sig_AoQ;
+        const double mZ = cfg.in_mu_Z, sZ = cfg.in_sig_Z, kk = cfg.in_k;
+        return node.Filter([=](double aoq, double z)
+                           {
+                                   if (useEll)
+                                           return insideEllipse(aoq, z, mA, sA, mZ, sZ, kk);
+                                   return isGoodIncoming(aoq, z); },
+                           {"in_AoQ", "in_Z"}, "incoming PID cut");
 }
 
 /// Outgoing fragment PID from MDF
@@ -655,6 +658,7 @@ static std::vector<std::string> detectorColumns()
 static std::vector<std::string> buildOutputColumns(bool hasNeutrons)
 {
         std::vector<std::string> cols = {
+            "in_AoQ", "in_Z",
             "AoQ_frag", "Z_frag_est", "A_frag", "M_frag",
             "beta_frag", "p_frag"};
 
@@ -758,8 +762,9 @@ void eventFilter(std::string setting = "",
                                        { return n.GetEntriesFast() > 0; },
                                        {"NeulandHits"});
 
-        // ── FRS incoming (graphical cut) + fragment PID ─────────────────────
-        auto df_frs = defineFrsIncoming(df_cut, cfg);
+        // ── FRS columns (before PID filter) + incoming PID + fragment PID ──────
+        auto df_frs_cols = defineFrsColumns(df_cut);
+        auto df_frs = applyFrsIncomingFilter(df_frs_cols, cfg);
         auto df_frag = defineFragmentPID(df_frs);
 
         // ═════════════════  UNREACTED 25F PATH  ══════════════════════════════
@@ -855,11 +860,24 @@ void eventFilter(std::string setting = "",
 
         df_out = defineOutgoingStartPos(df_out);
 
-        // ── Snapshot ────────────────────────────────────────────────────────
+        // ── Snapshot (post-PID, includes in_AoQ / in_Z) ─────────────────────
         df_out.Snapshot("FilterDataTree", outFile,
                         buildOutputColumns(cfg.hasNeutrons));
 
-        std::cout << "\n[OK] TTree saved in: " << outFile << "\n";
+        std::cout << "\n[OK] FilterDataTree saved in: " << outFile << "\n";
+
+        // ── Pre-PID diagnostic tree (all isotopes, before any PID selection) ─
+        // Contains in_AoQ, in_Z (FRS incoming) and AoQ_frag, Z_frag_est
+        // (outgoing fragment) for every event passing basic detector filters,
+        // so the incoming and outgoing PID gates can be verified visually.
+        auto df_prePID = defineFragmentPID(df_frs_cols);
+        ROOT::RDF::RSnapshotOptions diagOpts;
+        diagOpts.fMode = "UPDATE";
+        df_prePID.Snapshot("PIDDiagTree", outFile,
+                           {"in_AoQ", "in_Z", "AoQ_frag", "Z_frag_est"},
+                           diagOpts);
+
+        std::cout << "[OK] PIDDiagTree (pre-PID) saved in: " << outFile << "\n";
         if (fout)
                 fout->Close();
 }

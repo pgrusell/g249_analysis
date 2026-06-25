@@ -107,7 +107,7 @@ static Fit2DParams fitPID(TTree* tree,
 void gammaSpectra(TString reactionFile,
                   TString outFile       = "gamma_spectra_22O.root",
                   TString unreactedFile = "",          // optional: data_25F.root
-                  TString offsetFile    = "22O.txt",   // settings file in $repopath/final/settings/
+                  TString offsetFile    = "",   // settings file in $repopath/final/settings/
                   double  kPID          = PID_K_DEFAULT,
                   double  opaMin        = OPA_MIN,
                   double  opaMax        = OPA_MAX)
@@ -130,7 +130,7 @@ void gammaSpectra(TString reactionFile,
         return;
     }
 
-    std::cout << "\n=== gamma spectroscopy: 25F(p,2p)22O ===\n";
+    std::cout << "\n=== gamma spectroscopy: 23F(p,2p)22O ===\n";
     std::cout << "  Reaction file : " << reactionFile   << "\n";
     std::cout << "  Output file   : " << outFile        << "\n";
     std::cout << "  Unreacted file: " << (unreactedFile.IsNull() ? "(none)" : unreactedFile.Data()) << "\n";
