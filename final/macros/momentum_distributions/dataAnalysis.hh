@@ -23,6 +23,7 @@ private:
     bool fHasNeutrons = false;
 
     std::string fOutFileName = "";
+    std::string fSettingsFile = "";
 
     TH1F *fErel = nullptr;
     TH1F *fDeltaBeta = nullptr;
