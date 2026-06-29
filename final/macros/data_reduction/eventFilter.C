@@ -211,7 +211,7 @@ static ReactionConfig makeReactionConfig(const TString &reaction)
         {
                 cfg = {2.67, 2.755,
                        22.009965744 - 8.0 * 0.00511,
-                       "data_22O", true, false};
+                       "data_22O", true, false};      //first true/false is for hasNeutrons
         }
         else if (reaction == "25F24O")
         {
@@ -866,18 +866,49 @@ void eventFilter(std::string setting = "",
 
         std::cout << "\n[OK] FilterDataTree saved in: " << outFile << "\n";
 
-        // ── Pre-PID diagnostic tree (all isotopes, before any PID selection) ─
-        // Contains in_AoQ, in_Z (FRS incoming) and AoQ_frag, Z_frag_est
-        // (outgoing fragment) for every event passing basic detector filters,
-        // so the incoming and outgoing PID gates can be verified visually.
-        auto df_prePID = defineFragmentPID(df_frs_cols);
+        // ── Pre-PID diagnostic tree + 2D PID plots ──────────────────────────────
+        // Both branch directly off the raw df — NO multiplicity, CALIFA, NeuLAND,
+        // or IncomingTrack conditions.  Only the bare minimum to safely read the
+        // relevant branch is applied.
+        //
+        // Incoming: only FrsData must be non-empty.
+        auto df_raw_in = defineFrsColumns(
+            df.Filter([](TClonesArray &f)
+                      { return f.GetEntriesFast() > 0; }, {"FrsData"}));
+
+        // Fragment: also requires FragmentMDFTrack so AoQ_frag / Z_frag_est can be read.
+        auto df_raw_frag = defineFragmentPID(defineFrsColumns(
+            df.Filter([](TClonesArray &f)
+                      { return f.GetEntriesFast() > 0; }, {"FrsData"})
+              .Filter([](TClonesArray &m)
+                      { return m.GetEntriesFast() > 0; }, {"FragmentMDFTrack"})));
+
+        // Register as lazy actions — fused into one event loop with PIDDiagTree below.
+        auto h_in_prePID = df_raw_in.Histo2D(
+            {"h_in_prePID", "Incoming beam PID (no cuts);AoQ;Z",
+             300, 2.5, 3.1, 300, 6.0, 13.0},
+            "in_AoQ", "in_Z");
+        auto h_frag_prePID = df_raw_frag.Histo2D(
+            {"h_frag_prePID", "Fragment PID (no cuts);AoQ;Z",
+             300, 2.3, 3.3, 300, 4.0, 12.0},
+            "AoQ_frag", "Z_frag_est");
+
         ROOT::RDF::RSnapshotOptions diagOpts;
         diagOpts.fMode = "UPDATE";
-        df_prePID.Snapshot("PIDDiagTree", outFile,
-                           {"in_AoQ", "in_Z", "AoQ_frag", "Z_frag_est"},
-                           diagOpts);
+        df_raw_frag.Snapshot("PIDDiagTree", outFile,
+                             {"in_AoQ", "in_Z", "AoQ_frag", "Z_frag_est"},
+                             diagOpts);
 
-        std::cout << "[OK] PIDDiagTree (pre-PID) saved in: " << outFile << "\n";
+        std::cout << "[OK] PIDDiagTree (no cuts) saved in: " << outFile << "\n";
+
+        // Write 2D pre-selection PID histograms (already computed in the pass above).
+        {
+                TFile ftmp(outFile.c_str(), "UPDATE");
+                h_in_prePID->Write();
+                h_frag_prePID->Write();
+                std::cout << "[OK] Pre-selection PID histograms saved in: " << outFile << "\n";
+        }
+
         if (fout)
                 fout->Close();
 }
