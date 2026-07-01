@@ -38,10 +38,17 @@ MomentaDist getMomentaDistFromtxt(std::string txtFile, std::string histName)
     return momdis;
 }
 
-MomentaDist getMomentaDistFromtxtMultiCol(std::string txtFile, std::string histName)
+// ---------------------------------------------------------------------------
+// column == "y" -> dS/dQ_y : transverse component (px, or py by symmetry)
+// column == "z" -> dS/dQ_z : longitudinal component (pz)
+// column == "t" -> dS/dQ_t : transverse magnitude (pT); only defined/tabulated
+//                  for Q_i > 0, so the output histogram covers [0, maxBin].
+// ---------------------------------------------------------------------------
+MomentaDist getMomentaDistFromtxtMultiCol(std::string txtFile, std::string histName,
+                                          std::string column = "y")
 {
     MomentaDist momdis;
-    std::vector<double> Qi, Qy;
+    std::vector<double> Qi, Qsel;
     std::ifstream f(txtFile.c_str());
     if (!f.is_open())
     {
@@ -58,8 +65,11 @@ MomentaDist getMomentaDistFromtxtMultiCol(std::string txtFile, std::string histN
         // Header / label / units / blank lines fail this and are skipped.
         if (!(ss >> qi >> qz >> qt >> qy >> q))
             continue;
+        if (column == "t" && qi <= 0.0)
+            continue; // dS/dQ_t (pT) is only tabulated for Q_i > 0
+
         Qi.push_back(qi);
-        Qy.push_back(qy); // dS/dQ_y -> used for BOTH px and py fits
+        Qsel.push_back(column == "z" ? qz : (column == "t" ? qt : qy));
     }
 
     const int nBins = Qi.size();
@@ -69,24 +79,26 @@ MomentaDist getMomentaDistFromtxtMultiCol(std::string txtFile, std::string histN
                   << txtFile << "\n";
         return momdis;
     }
-    const double maxBin = Qi[nBins - 1] + (Qi[1] - Qi[0]) / 2.;
-    // Stored in .Qt so downstream code is unchanged, but content is dS/dQ_y.
-    momdis.Qt = new TH1F((std::string("Qy") + histName).c_str(), "Qy",
-                         nBins, -maxBin, maxBin);
+    const double halfBin = (Qi[1] - Qi[0]) / 2.;
+    const double xlo = (column == "t") ? 0.0 : -(Qi[nBins - 1] + halfBin);
+    const double xhi = Qi[nBins - 1] + halfBin;
+    momdis.Qt = new TH1F((std::string("Q") + column + histName).c_str(), "Q",
+                         nBins, xlo, xhi);
     for (int i = 0; i < nBins; i++)
-        momdis.Qt->SetBinContent(i + 1, Qy[i]);
+        momdis.Qt->SetBinContent(i + 1, Qsel[i]);
 
     return momdis;
 }
 
 // ---------------------------------------------------------------------------
 //   format == 0  ->  two-column  (legacy: Qi Qt)             -> extracts Qt
-//   format == 1  ->  multi-column (JT 5-col)                 -> extracts Qy
+//   format == 1  ->  multi-column (JT/CB 5-col)               -> extracts `column`
 // ---------------------------------------------------------------------------
-MomentaDist getMomentaDist(std::string txtFile, std::string histName, int format)
+MomentaDist getMomentaDist(std::string txtFile, std::string histName, int format,
+                           std::string column = "y")
 {
     if (format == 1)
-        return getMomentaDistFromtxtMultiCol(txtFile, histName);
+        return getMomentaDistFromtxtMultiCol(txtFile, histName, column);
     return getMomentaDistFromtxt(txtFile, histName); // default: legacy
 }
 
@@ -223,6 +235,7 @@ std::vector<double> make_fit(RooDataHist *data,
     {
         std::string name = "val" + std::to_string(i);
         const double init = 1.0 / (nTerms + 1 - i);
+
         auto *v = new RooRealVar(name.c_str(), name.c_str(), init, 0., 1.);
         coefVars.push_back(v);
         coeffs.add(*v);
@@ -622,223 +635,151 @@ void drawBootstrapCanvas(const std::string &cName, const std::string &cTitle,
     c->Update();
 }
 
-void test(int theoFormat_gen = 0, // 1 = JT multi-col  (generador)
-          int theoFormat_fit = 1) // 0 = legacy 2-col  (ajuste CB)
+void test(int nEvents = 6000, int nToys = 10000, double noiseSigma = 5.0)
 {
     RooMsgService::instance().setGlobalKillBelow(RooFit::ERROR);
 
     // -----------------------------------------------------------------------
-    // 1) Templates GENERADORES: Tostevin (JT, formato multi-columna)
-    //    Mezcla verdadera: 0.7 * p_{1/2} + 0.3 * d_{5/2}
+    // 1) Bertulani (CB) calculation: same three states, read as px (dS/dQ_y)
+    //    and pz (dS/dQ_z) for the generator, and as pT (dS/dQ_t) for the fit
+    //    templates. Using the same basis for generation and fit makes this a
+    //    closure test of the pT fitting procedure.
     // -----------------------------------------------------------------------
-    std::vector<std::string> inFilesGen = {
-        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_p12-gs.txt",
-        "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/JT/25F/sigt_d52-gs.txt"};
-    std::vector<std::string> labelsGen = {"1p_{1/2} [JT]", "1d_{5/2} [JT]"};
-
-    const double trueF_p12 = 0.1; // p_{1/2}
-    const double trueF_d52 = 0.9; // d_{5/2}
-
-    // -----------------------------------------------------------------------
-    // 2) Templates de AJUSTE: Bertulani (CB, formato legacy 2-col)
-    //    p_{1/2} + s_{1/2} + d_{5/2}
-    // -----------------------------------------------------------------------
-    std::vector<std::string> inFilesFit = {
+    std::vector<std::string> inFiles = {
         "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/CB/momdis_1p12_19_215.txt",
         "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/CB/momdis_2s12_14_455.txt",
         "/nucl_lustre/pablogrusell/g249/g249_analysis/theory/CB/momdis_1d52_14_455.txt"};
-    std::vector<std::string> labelsFit = {"1p_{1/2} [CB]", "2s_{1/2} [CB]", "1d_{5/2} [CB]"};
+    std::vector<std::string> labels = {"1p_{1/2} [CB]", "2s_{1/2} [CB]", "1d_{5/2} [CB]"};
+    const int nC = (int)inFiles.size();
 
-    // -----------------------------------------------------------------------
-    // Binning de referencia (igual que en fitMomdis)
-    // -----------------------------------------------------------------------
+    const double trueF_p12 = 0.1;                               // p_{1/2}
+    const double trueF_d52 = 0.9;                               // d_{5/2}
+    std::vector<double> trueVals = {trueF_p12, 0.0, trueF_d52}; // p12, s12, d52
+
     const int nBinsRef = 40;
     const double maxBin = 300.0;
-    RooRealVar x("x", "p_{x} [MeV/c]", -maxBin, maxBin);
 
-    auto *hRef = new TH1F("hRef", "binning reference", nBinsRef, -maxBin, maxBin);
-    hRef->SetDirectory(nullptr);
+    RooRealVar px("px", "p_{x} [MeV/c]", -maxBin, maxBin);
+    RooRealVar pz("pz", "p_{z} [MeV/c]", -maxBin, maxBin);
+    RooRealVar pT("pT", "p_{T} [MeV/c]", 0.0, maxBin);
 
-    // -----------------------------------------------------------------------
-    // Cargar templates generadores (JT) y construir el modelo verdadero
-    // -----------------------------------------------------------------------
-    const int nGen = (int)inFilesGen.size();
-    std::vector<TH1F *> tmplGen(nGen);
-    std::vector<RooHistPdf *> theoryGen(nGen);
-    for (int k = 0; k < nGen; k++)
+    auto *hRefPx = new TH1F("hRefPx", "binning reference px", nBinsRef, -maxBin, maxBin);
+    hRefPx->SetDirectory(nullptr);
+    auto *hRefPz = new TH1F("hRefPz", "binning reference pz", nBinsRef, -maxBin, maxBin);
+    hRefPz->SetDirectory(nullptr);
+    auto *hRefPt = new TH1F("hRefPt", "binning reference pT", nBinsRef / 2, 0.0, maxBin);
+    hRefPt->SetDirectory(nullptr);
+
+    std::vector<TH1F *> tmplPx(nC), tmplPz(nC), tmplPt(nC);
+    std::vector<RooHistPdf *> theoryPx(nC), theoryPz(nC), theoryPt(nC);
+    for (int k = 0; k < nC; k++)
     {
-        auto md = getMomentaDist(inFilesGen[k], Form("gen_%d", k), theoFormat_gen);
+        auto mdPx = getMomentaDist(inFiles[k], Form("px_%d", k), 1, "y");
+        auto mdPz = getMomentaDist(inFiles[k], Form("pz_%d", k), 1, "z");
+        auto mdPt = getMomentaDist(inFiles[k], Form("pt_%d", k), 1, "t");
 
-        tmplGen[k] = buildTemplate(md.Qt, hRef, Form("tmpl_gen_%d", k));
-        theoryGen[k] = create_pdf_from_histogram(x, tmplGen[k]);
+        tmplPx[k] = buildTemplate(mdPx.Qt, hRefPx, Form("tmpl_px_%d", k));
+        tmplPz[k] = buildTemplate(mdPz.Qt, hRefPz, Form("tmpl_pz_%d", k));
+        tmplPt[k] = buildTemplate(mdPt.Qt, hRefPt, Form("tmpl_pt_%d", k));
+
+        theoryPx[k] = create_pdf_from_histogram(px, tmplPx[k]);
+        theoryPz[k] = create_pdf_from_histogram(pz, tmplPz[k]);
+        theoryPt[k] = create_pdf_from_histogram(pT, tmplPt[k]);
     }
 
-    // Modelo generador: RooAddPdf NO recursivo -> fracciones físicas directas
-    // Índice 0 = p_{1/2}, índice 1 = d_{5/2}
+    // -----------------------------------------------------------------------
+    // Generator model: 0.1 p12 + 0.9 d52, in the px/pz (CB) basis.
+    // -----------------------------------------------------------------------
     RooRealVar frac_p12("frac_p12", "f(p12)", trueF_p12, 0., 1.);
     RooRealVar frac_d52("frac_d52", "f(d52)", trueF_d52, 0., 1.);
 
-    RooAddPdf true_model("true_model", "0.7 p12 + 0.3 d52 [JT]",
-                         RooArgList(*theoryGen[0], *theoryGen[1]),
-                         RooArgList(frac_p12, frac_d52));
-
-    const int nEvents = 6000;
+    RooAddPdf true_model_px("true_model_px", "0.1 p12 + 0.9 d52 [CB, px basis]",
+                            RooArgList(*theoryPx[0], *theoryPx[2]),
+                            RooArgList(frac_p12, frac_d52));
+    RooAddPdf true_model_pz("true_model_pz", "0.1 p12 + 0.9 d52 [CB, pz basis]",
+                            RooArgList(*theoryPz[0], *theoryPz[2]),
+                            RooArgList(frac_p12, frac_d52));
 
     // -----------------------------------------------------------------------
-    // Cargar templates de ajuste (CB)
+    // 2) Generate toy px and pz from the Bertulani model. py is obtained by
+    //    conservation: azimuthal symmetry around the beam (z) axis means px
+    //    and py follow the same 1D distribution, so py is drawn independently
+    //    from the same px model rather than from a separate template.
     // -----------------------------------------------------------------------
-    const int nFit = (int)inFilesFit.size();
-    std::vector<TH1F *> tmplFit(nFit);
-    std::vector<RooHistPdf *> theoryFit(nFit);
-    for (int k = 0; k < nFit; k++)
+    RooDataSet *dataPx = true_model_px.generate(px, nEvents, RooFit::AutoBinned(kFALSE));
+    RooDataSet *dataPy = true_model_px.generate(px, nEvents, RooFit::AutoBinned(kFALSE)); // independent draw -> py
+    RooDataSet *dataPz = true_model_pz.generate(pz, nEvents, RooFit::AutoBinned(kFALSE));
+
+    // -----------------------------------------------------------------------
+    // 3) Add Gaussian resolution noise to px, py; 4) compute pT.
+    // -----------------------------------------------------------------------
+    auto *hPt = new TH1F("hPt_toy", "toy p_{T}", nBinsRef / 2, 0.0, maxBin);
+    hPt->SetDirectory(nullptr);
+
+    for (int i = 0; i < nEvents; i++)
     {
-        auto md = getMomentaDist(inFilesFit[k], Form("fit_%d", k), theoFormat_fit);
-        tmplFit[k] = buildTemplate(md.Qt, hRef, Form("tmpl_fit_%d", k));
-        theoryFit[k] = create_pdf_from_histogram(x, tmplFit[k]);
+        const double pxVal = dataPx->get(i)->getRealValue("px") + gRandom->Gaus(0.0, noiseSigma);
+        const double pyVal = dataPy->get(i)->getRealValue("px") + gRandom->Gaus(0.0, noiseSigma);
+        const double ptVal = std::sqrt(pxVal * pxVal + pyVal * pyVal) + 10;
+        if (ptVal < maxBin)
+            hPt->Fill(ptVal);
     }
 
     // -----------------------------------------------------------------------
-    // Generar dataset observado y ajustar con CB
+    // 5) Bertulani pT templates (dS/dQ_t) + 6) fit.
     // -----------------------------------------------------------------------
-    RooDataSet *data = true_model.generate(x, nEvents);
-    RooDataHist *binnedData = data->binnedClone();
+    RooDataHist dataPt("dataPt_toy", "toy data pT", RooArgList(pT), hPt);
 
-    // Ajuste nominal
-    std::vector<double> params = make_fit(binnedData, theoryFit, x, /*doPlot=*/true);
+    std::vector<double> params = make_fit(&dataPt, theoryPt, pT, /*doPlot=*/true);
 
-    // Bootstrap (incertidumbres asimétricas)
     std::vector<TH1F *> bootDists;
-    std::vector<double> uncs = calculateUncertainties(binnedData, theoryFit, x,
-                                                      bootDists, 10000, "boot_test");
+    std::vector<double> uncs = calculateUncertainties(&dataPt, theoryPt, pT,
+                                                      bootDists, nToys, "boot_test");
 
-    // Truth resampling (con el modelo generador JT, ajustado con CB)
-    std::vector<TH1F *> truthDists = sampleFromTruth(true_model, theoryFit, x,
-                                                     nEvents, 10000);
-
-    // -----------------------------------------------------------------------
-    // Resumen por consola
-    // -----------------------------------------------------------------------
-    // Valores "verdaderos" en el espacio CB: la señal p12 debería
-    // absorberse en p12-CB, la de d52 en d52-CB, y s12 ~ 0.
-    std::vector<double> trueVals = {trueF_p12, 0.0, trueF_d52}; // p12, s12, d52
-
-    std::cout << "\n=== test() JT->CB: 0.7 p12 + 0.3 d52 generado con JT, "
-                 "ajustado con CB (p12+s12+d52) ===\n";
+    std::cout << "\n=== test(): px,py generated from Bertulani (CB) px basis "
+                 "(0.1 p12 + 0.9 d52), noise sigma = "
+              << noiseSigma
+              << " MeV/c, fit pT = sqrt(px^2+py^2) with Bertulani pT "
+                 "(dS/dQ_t) templates (p12+s12+d52) ===\n";
     for (int i = 0; i < (int)params.size(); i++)
-        std::cout << labelsFit[i] << " (phi_" << i << "): "
+        std::cout << labels[i] << " (phi_" << i << "): "
                   << params[i]
                   << "  -" << params[i] - uncs[2 * i]
                   << "  +" << uncs[2 * i + 1] - params[i]
                   << "   (true ~ " << trueVals[i] << ")\n";
 
-    // -----------------------------------------------------------------------
-    // Canvas de comparación: bootstrap vs truth resampling
-    // -----------------------------------------------------------------------
-    const int nPars = (int)params.size();
-    auto *cmp = new TCanvas("cmp_JT_CB",
-                            "JT generated, CB fitted: bootstrap vs truth",
-                            1400, 450);
-    cmp->Divide(nPars, 1);
-
-    for (int i = 0; i < nPars; i++)
-    {
-        cmp->cd(i + 1);
-        TH1F *hb = bootDists[i];
-        TH1F *ht = truthDists[i];
-
-        if (hb->Integral() > 0)
-            hb->Scale(1.0 / hb->Integral());
-        if (ht->Integral() > 0)
-            ht->Scale(1.0 / ht->Integral());
-
-        hb->SetLineColor(kBlue + 1);
-        hb->SetLineWidth(2);
-        ht->SetLineColor(kRed + 1);
-        ht->SetLineWidth(2);
-
-        std::string title = labelsFit[i] + " (#phi_{" + std::to_string(i) + "}" + ");fitted value;normalized";
-        hb->SetTitle(title.c_str());
-
-        double ymax = std::max(hb->GetMaximum(), ht->GetMaximum()) * 1.25;
-        hb->SetMaximum(ymax);
-        hb->SetMinimum(0);
-        hb->Draw("HIST");
-        ht->Draw("HIST SAME");
-
-        // Valor nominal del ajuste
-        auto *lNom = new TLine(params[i], 0, params[i], ymax);
-        lNom->SetLineColor(kBlack);
-        lNom->SetLineStyle(2);
-        lNom->SetLineWidth(2);
-        lNom->Draw();
-
-        // Valor verdadero esperado
-        auto *lTrue = new TLine(trueVals[i], 0, trueVals[i], ymax);
-        lTrue->SetLineColor(kGreen + 2);
-        lTrue->SetLineStyle(1);
-        lTrue->SetLineWidth(2);
-        lTrue->Draw();
-
-        // Cuantiles 16 / 84 del bootstrap
-        auto *lLo = new TLine(uncs[2 * i], 0, uncs[2 * i], ymax);
-        auto *lHi = new TLine(uncs[2 * i + 1], 0, uncs[2 * i + 1], ymax);
-        lLo->SetLineColor(kOrange + 1);
-        lLo->SetLineStyle(3);
-        lLo->SetLineWidth(2);
-        lHi->SetLineColor(kOrange + 1);
-        lHi->SetLineStyle(3);
-        lHi->SetLineWidth(2);
-        lLo->Draw();
-        lHi->Draw();
-
-        auto *leg = new TLegend(0.52, 0.62, 0.88, 0.88);
-        leg->SetBorderSize(0);
-        leg->SetFillStyle(0);
-        leg->AddEntry(hb, "Bootstrap", "l");
-        leg->AddEntry(ht, "Truth resample", "l");
-        leg->AddEntry(lNom, "Nominal fit", "l");
-        leg->AddEntry(lTrue, "True value", "l");
-        leg->AddEntry(lLo, "16% / 84% q.", "l");
-        leg->Draw();
-    }
-    cmp->Update();
-
-    // -----------------------------------------------------------------------
-    // Canvas con el ajuste sobre los pseudo-datos (RooPlot)
-    // -----------------------------------------------------------------------
     std::vector<int> colors = {kBlue, kMagenta, kGreen + 2};
-    std::vector<double> lo16(nFit), hi84(nFit);
-    for (int k = 0; k < nFit; k++)
+    std::vector<double> lo16(nC), hi84(nC);
+    for (int k = 0; k < nC; k++)
     {
         lo16[k] = uncs[2 * k];
         hi84[k] = uncs[2 * k + 1];
     }
 
-    // Chi2 del ajuste nominal
     std::vector<RooRealVar *> dummyCoefs;
     std::unique_ptr<RooAddPdf> modelFixed(
-        buildFixedModel(theoryFit, params, dummyCoefs, "chi2_test"));
-
-    TH1F *hData = static_cast<TH1F *>(binnedData->createHistogram("hData_test", x));
-    hData->SetDirectory(nullptr);
+        buildFixedModel(theoryPt, params, dummyCoefs, "chi2_test"));
 
     double chi2;
     int ndf, nbu;
-    computeChi2(hData, modelFixed.get(), x, nFit, "test", chi2, ndf, nbu);
+    computeChi2(hPt, modelFixed.get(), pT, nC, "test", chi2, ndf, nbu);
 
-    drawFitCanvas("c_fit_JT_CB",
-                  "JT pseudo-data fitted with CB templates",
-                  "p_{x} [MeV/c]",
-                  hData, binnedData, theoryFit, x,
+    drawFitCanvas("c_fit_test_pT",
+                  "Toy p_{T} (from noisy px, py) fitted with Bertulani p_{T} templates",
+                  "p_{T} [MeV/c]",
+                  hPt, &dataPt, theoryPt, pT,
                   params, lo16, hi84,
-                  labelsFit, colors, chi2, ndf, "test");
+                  labels, colors, chi2, ndf, "test");
+
+    drawBootstrapCanvas("c_boot_test_pT", "Bootstrap distributions p_{T}",
+                        bootDists, params, lo16, hi84, labels);
 
     std::cout << "\nchi2/ndf = " << chi2 << " / " << ndf
               << " = " << (ndf > 0 ? chi2 / ndf : -1.) << "\n";
 
-    delete hData;
-    delete data;
-    delete binnedData;
+    delete dataPx;
+    delete dataPy;
+    delete dataPz;
 }
 
 void fitMomdis(double erelMin = 1.5, double erelMax = 4,

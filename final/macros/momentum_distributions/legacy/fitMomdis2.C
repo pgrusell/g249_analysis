@@ -11,24 +11,6 @@
 #include <RooChi2Var.h>
 #include <TRandom3.h>
 
-// =============================================================================
-// fitMomdis_extended.C — same as fitMomdis.C but with EXTENDED likelihood.
-//
-// Differences vs the recursive version:
-//   - The model is RooAddPdf with N free yields c_k (one per component),
-//     c_k >= 0 (we allow a small negative range so MINOS can build the lower
-//     contour when a component is at the physical boundary).
-//   - The fit is extended (Extended(true)): N is a fit parameter.
-//     N_total is derived as Ntot = sum(c_k) (RooFormulaVar).
-//   - Physical fractions phi_k = c_k / sum(c_j), also as RooFormulaVar.
-//   - Errors on N and phi_k are obtained via getPropagatedError, which uses
-//     the FULL covariance matrix (so the strong negative correlations
-//     between yields are accounted for properly).
-//
-// Everything else (input reading, offset subtraction, Erel/opa cuts, residual
-// pulls, py refit, plots) is identical to the recursive version.
-// =============================================================================
-
 struct MomentaDist
 {
     TH1F *Qz = nullptr;
@@ -166,7 +148,7 @@ TH1F *buildTemplate(TH1F *hTheo, TH1F *hExp, std::string name)
 // =============================================================================
 // MAIN
 // =============================================================================
-void fitMomdis2(double erelMin = 1.5, double erelMax = 4)
+void fitMomdis2(double erelMin = 4, double erelMax = 7.5)
 {
     using namespace RooFit;
     RooMsgService::instance().setGlobalKillBelow(RooFit::WARNING);

@@ -100,16 +100,16 @@ static constexpr Int_t kFragZ = 8;
 static constexpr Int_t kFragA = 24;
 static const Double_t kFragMass = static_cast<Double_t>(kFragA) * kAMU; // GeV/c^2
 
-// Smearing values (from the user request)
-// static constexpr Double_t kSigmaFootPos = 75.e-4;   // 75 um  -> cm
-// static constexpr Double_t kSigmaFiberPos = 150.e-4; // 150 um -> cm
-// static constexpr Double_t kSigmaTofdPos = 1;  // 150 um -> cm
-// static constexpr Double_t kSigmaTofdCharge = 0.2;   // absolute Z units
+// Smearing values
+// static Double_t kSigmaFootPos = 75.e-4;   // 75 um  -> cm  (mutable for ScanResolutions)
+// static Double_t kSigmaFiberPos = 150.e-4; // 150 um -> cm
+// static Double_t kSigmaTofdPos = 1;        // cm
+// static Double_t kSigmaTofdCharge = 0.2;   // absolute Z units
 
-static constexpr Double_t kSigmaFootPos = 75.e-4;    // 75 um  -> cm
-static constexpr Double_t kSigmaFiberPos = 1000.e-4; // 150 um -> cm
-static constexpr Double_t kSigmaTofdPos = 1;         // 150 um -> cm
-static constexpr Double_t kSigmaTofdCharge = 0.5;    // absolute Z units
+static Double_t kSigmaFootPos = 75.e-4;   // 75 um  -> cm  (mutable for ScanResolutions)
+static Double_t kSigmaFiberPos = 150.e-4; // 150 um -> cm
+static Double_t kSigmaTofdPos = 1;        // cm
+static Double_t kSigmaTofdCharge = 0.2;   // absolute Z units
 
 // GLAD currents (must match the experimental analysis exactly so that the
 // MDF rescaling reproduces the experiment)
@@ -211,11 +211,11 @@ static void FixupFib30(const TVector3 &f1, TVector3 &f2, const TVector3 &f3)
 // ----------------------------------------------------------------------------
 // Main entry point
 // ----------------------------------------------------------------------------
-void ana(const char *simFile = "glad.simu.root",
-         const char *truthFile = "glad.truth.root",
+void ana(const char *simFile = "sim_s12.root",
+         const char *truthFile = "gen_s12.root",
          const char *mdfFile = "PoQ_9vars_150terms.txt",
          const char *outFile = "sim_analysis.root",
-         Long64_t maxEvents = -1,
+         Long64_t maxEvents = 10000,
          UInt_t randomSeed = 0,
          Bool_t useExperimentGeometry = kFALSE)
 {
@@ -380,9 +380,25 @@ void ana(const char *simFile = "glad.simu.root",
     auto hPzRestTru = new TH1D("hPzRestTru", "Truth p_{z} (rest);p_{z} [GeV/c];counts", 400, -1.0, 1.0);
 
     // ----- Residuals (rec - truth) --------------------------------------
-    auto hResPx = new TH1D("hResPx", "p_{x}^{rec} - p_{x}^{truth};#Deltap_{x} [GeV/c];counts", 400, -0.3, 0.3);
-    auto hResPy = new TH1D("hResPy", "p_{y}^{rec} - p_{y}^{truth};#Deltap_{y} [GeV/c];counts", 400, -0.3, 0.3);
-    auto hResPz = new TH1D("hResPz", "p_{z}^{rec} - p_{z}^{truth};#Deltap_{z} [GeV/c];counts", 400, -0.5, 0.5);
+    auto hResPx = new TH1D("hResPx", "p_{x}^{rec} - p_{x}^{truth};#Deltap_{x} [GeV/c];counts", 400, -0.05, 0.05);
+    auto hResPy = new TH1D("hResPy", "p_{y}^{rec} - p_{y}^{truth};#Deltap_{y} [GeV/c];counts", 400, -0.05, 0.05);
+    auto hResPz = new TH1D("hResPz", "p_{z}^{rec} - p_{z}^{truth};#Deltap_{z} [GeV/c];counts", 400, -1.5, 1.5);
+
+    // ----- Total lab momentum resolution --------------------------------
+    auto hPRes = new TH1D("hPRes",
+                          "Total momentum resolution;(p_{rec}-p_{tru})/p_{tru};counts",
+                          400, -0.05, 0.05);
+
+    // ----- Component lab momentum resolutions (delta_pi / p_tru) --------
+    auto hPxRes = new TH1D("hPxRes",
+                           "p_{x} resolution;(p_{x}^{rec}-p_{x}^{tru})/p_{tru};counts",
+                           400, -0.05, 0.05);
+    auto hPyRes = new TH1D("hPyRes",
+                           "p_{y} resolution;(p_{y}^{rec}-p_{y}^{tru})/p_{tru};counts",
+                           400, -0.05, 0.05);
+    auto hPzRes = new TH1D("hPzRes",
+                           "p_{z} resolution;(p_{z}^{rec}-p_{z}^{tru})/p_{tru};counts",
+                           400, -0.5, 0.5);
 
     // ----- Correlation (truth vs rec) -----------------------------------
     auto h2Pz = new TH2D("h2Pz_truth_vs_rec",
@@ -433,9 +449,9 @@ void ana(const char *simFile = "glad.simu.root",
     // ------------------------------------------------------------------------
     // 6) Event loop
     // ------------------------------------------------------------------------
-    const Long64_t nEntries = (maxEvents < 0)
-                                  ? tSim->GetEntries()
-                                  : std::min<Long64_t>(maxEvents, tSim->GetEntries());
+    Long64_t nEntries = (maxEvents < 0)
+                            ? tSim->GetEntries()
+                            : std::min<Long64_t>(maxEvents, tSim->GetEntries());
 
     std::cout
         << "[run_sim_analysis] Processing " << nEntries << " events\n";
@@ -631,13 +647,19 @@ void ana(const char *simFile = "glad.simu.root",
         const Double_t X8 = h8.pos + gRandom->Gaus(0., kSigmaFootPos);
         const Double_t Z5 = h5.z, Z6 = h6.z, Z7 = h7.z, Z8 = h8.z;
 
-        // Straight-line slopes
+        // // Straight-line slopes
+        // const Double_t tx_smear = (X8 - X6) / (Z8 - Z6);
+        // const Double_t ty_smear = (Y7 - Y5) / (Z7 - Z5);
+        // // Vertex at z=0 (target center, matches the experiment convention)
+        // const Double_t vx_smear = X6 - tx_smear * Z6;
+        // const Double_t vy_smear = Y5 - ty_smear * Z5;
+        // const Double_t vz_smear = 0.;
+
         const Double_t tx_smear = (X8 - X6) / (Z8 - Z6);
         const Double_t ty_smear = (Y7 - Y5) / (Z7 - Z5);
-        // Vertex at z=0 (target center, matches the experiment convention)
-        const Double_t vx_smear = X6 - tx_smear * Z6;
-        const Double_t vy_smear = Y5 - ty_smear * Z5;
-        const Double_t vz_smear = 0.;
+        const Double_t footStartX = X6;
+        const Double_t footStartY = Y5;
+        const Double_t footStartZ = Z5;
 
         // Keep an MC-truth slope handy for diagnostics
         const Double_t tx_true = px_true / pz_true;
@@ -718,9 +740,15 @@ void ana(const char *simFile = "glad.simu.root",
 
         // -------- Build MDF input (exactly as R3BTrackingG249::Exec) --------
         // Vertex and slopes must be in cm. Smeared values.
-        const Double_t startX = vx_smear;
-        const Double_t startY = vy_smear;
-        const Double_t startZ = vz_smear;
+        // const Double_t startX = vx_smear;
+        // const Double_t startY = vy_smear;
+        // const Double_t startZ = vz_smear;
+        // const Double_t startTX = tx_smear;
+        // const Double_t startTY = ty_smear;
+
+        const Double_t startX = footStartX;
+        const Double_t startY = footStartY;
+        const Double_t startZ = footStartZ;
         const Double_t startTX = tx_smear;
         const Double_t startTY = ty_smear;
 
@@ -879,6 +907,10 @@ void ana(const char *simFile = "glad.simu.root",
         hAoQ->Fill(AoQ);
         hZ->Fill(Z_smear);
         hPlab->Fill(p_recon);
+        hPRes->Fill((p_recon - p_true) / p_true);
+        hPxRes->Fill((p3_lab.X() - px_true) / p_true);
+        hPyRes->Fill((p3_lab.Y() - py_true) / p_true);
+        hPzRes->Fill((p3_lab.Z() - pz_true) / p_true);
 
         hPxRestRec->Fill(p4_rest.Px());
         hPyRestRec->Fill(p4_rest.Py());
@@ -947,6 +979,10 @@ void ana(const char *simFile = "glad.simu.root",
     hResPx->Write();
     hResPy->Write();
     hResPz->Write();
+    hPRes->Write();
+    hPxRes->Write();
+    hPyRes->Write();
+    hPzRes->Write();
     h2Pz->Write();
     fout->Close();
 
@@ -974,4 +1010,143 @@ void ana(const char *simFile = "glad.simu.root",
               << "  CPU time              : " << timer.CpuTime() << " s\n";
 
     delete mdfPoQ;
+}
+
+// ----------------------------------------------------------------------------
+// ScanResolutions()
+//
+// Run the full reconstruction for 4 values of each detector's resolution
+// (FOOT position, Fiber position, ToFD charge), keeping the other two at
+// their nominal values.  Produces three canvases, each overlaying hPyRes for
+// the four scan points.
+//
+// Usage (from a ROOT session):
+//   .x ana.C   // or load via .L
+//   ScanResolutions()
+//   ScanResolutions("glad.simu.root","glad.truth.root","PoQ_9vars_150terms.txt", 3000)
+// ----------------------------------------------------------------------------
+void ScanResolutions(
+    const char *simFile = "glad.simu.root",
+    const char *truthFile = "glad.truth.root",
+    const char *mdfFile = "PoQ_9vars_150terms.txt",
+    Long64_t nEvents = 5000)
+{
+    // Nominal values (must match the constexpr defaults above)
+    const Double_t nomFoot = 150.e-4;  // cm
+    const Double_t nomFiber = 150.e-4; // cm
+    const Double_t nomTofd = 0.5;      // absolute Z units
+
+    // Four scan points per detector
+    const Int_t nV = 4;
+    Double_t footVals[nV] = {75.e-4, 100.e-4, 150.e-4, 200.e-4}; // um -> cm
+    Double_t fiberVals[nV] = {150.e-4, 200.e-4, 250.e-4, 1000.e-4};
+    Double_t tofdVals[nV] = {0.2, 0.5, 0.75, 1};
+
+    const Int_t colors[nV] = {kBlue + 1, kGreen + 2, kRed, kViolet + 1};
+
+    // Run ana() with current global sigmas, read back hPyRes from the temp file.
+    UInt_t seed = 42;
+    auto doRun = [&](const char *tag) -> TH1D *
+    {
+        TString tmp = Form("_scanres_%s.root", tag);
+        ana(simFile, truthFile, mdfFile, tmp.Data(), nEvents, seed);
+        seed += 100;
+        TFile *f = TFile::Open(tmp.Data(), "READ");
+        if (!f || f->IsZombie())
+        {
+            std::cerr << "[ScanResolutions] ERROR: could not open " << tmp << "\n";
+            return nullptr;
+        }
+        auto *h = dynamic_cast<TH1D *>(f->Get("hPyRes"));
+        TH1D *hc = h ? static_cast<TH1D *>(h->Clone(Form("hPyRes_%s", tag))) : nullptr;
+        if (hc)
+            hc->SetDirectory(nullptr);
+        f->Close();
+        gSystem->Unlink(tmp.Data());
+        return hc;
+    };
+
+    // ---- FOOT position scan (Fiber and ToFD at nominal) --------------------
+    TH1D *hFoot[nV] = {};
+    kSigmaFiberPos = nomFiber;
+    kSigmaTofdCharge = nomTofd;
+    for (Int_t i = 0; i < nV; ++i)
+    {
+        kSigmaFootPos = footVals[i];
+        hFoot[i] = doRun(Form("foot%d", i));
+    }
+    kSigmaFootPos = nomFoot;
+
+    // ---- Fiber position scan -----------------------------------------------
+    TH1D *hFiber[nV] = {};
+    kSigmaFootPos = nomFoot;
+    kSigmaTofdCharge = nomTofd;
+    for (Int_t i = 0; i < nV; ++i)
+    {
+        kSigmaFiberPos = fiberVals[i];
+        hFiber[i] = doRun(Form("fiber%d", i));
+    }
+    kSigmaFiberPos = nomFiber;
+
+    // ---- ToFD charge scan --------------------------------------------------
+    TH1D *hTofd[nV] = {};
+    kSigmaFootPos = nomFoot;
+    kSigmaFiberPos = nomFiber;
+    for (Int_t i = 0; i < nV; ++i)
+    {
+        kSigmaTofdCharge = tofdVals[i];
+        hTofd[i] = doRun(Form("tofd%d", i));
+    }
+    kSigmaTofdCharge = nomTofd;
+
+    // ---- Drawing helper: overlay four histograms on a new canvas -----------
+    auto drawScan = [&](TH1D **hArr,
+                        const char *cname, const char *ctitle,
+                        Double_t *vals,
+                        const char *unit, Double_t scale)
+    {
+        TCanvas *c = new TCanvas(cname, ctitle, 900, 650);
+        c->SetLeftMargin(0.13);
+        TLegend *leg = new TLegend(0.58, 0.58, 0.93, 0.92);
+        leg->SetBorderSize(0);
+        leg->SetFillStyle(0);
+
+        Double_t yMax = 0.;
+        for (Int_t i = 0; i < nV; ++i)
+            if (hArr[i])
+                yMax = TMath::Max(yMax, hArr[i]->GetMaximum());
+
+        Bool_t first = kTRUE;
+        for (Int_t i = 0; i < nV; ++i)
+        {
+            if (!hArr[i])
+                continue;
+            hArr[i]->SetLineColor(colors[i]);
+            hArr[i]->SetLineWidth(2);
+            if (first)
+            {
+                hArr[i]->GetYaxis()->SetRangeUser(0., yMax * 1.15);
+                hArr[i]->Draw("HIST");
+                first = kFALSE;
+            }
+            else
+            {
+                hArr[i]->Draw("HIST SAME");
+            }
+            leg->AddEntry(hArr[i],
+                          Form("#sigma = %.1f %s", vals[i] * scale, unit), "l");
+        }
+        leg->Draw();
+        c->Update();
+    };
+
+    drawScan(hFoot, "cScanFoot",
+             "p_{y} resolution vs FOOT #sigma;(p_{y}^{rec}-p_{y}^{tru})/p_{tru};counts",
+             footVals, "#mum", 1.e4);
+    drawScan(hFiber, "cScanFiber",
+             "p_{y} resolution vs Fiber #sigma;(p_{y}^{rec}-p_{y}^{tru})/p_{tru};counts",
+             fiberVals, "#mum", 1.e4);
+    drawScan(hTofd, "cScanTofd",
+             "p_{y} resolution vs ToFD charge #sigma;(p_{y}^{rec}-p_{y}^{tru})/p_{tru};counts",
+             tofdVals, "Z", 1.0);
 }

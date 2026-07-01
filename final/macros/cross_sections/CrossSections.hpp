@@ -9,6 +9,7 @@ struct TreeData
     std::vector<double> Z_frag_est;
     std::vector<double> AoQ_frag;
     std::vector<double> califa_opa; // empty if not loaded (incoming tree)
+    std::vector<double> Erel;       // empty if not loaded (incoming tree)
 };
 
 struct OpaCutResults
@@ -122,6 +123,14 @@ public:
     void SetKEllipseUnreacted(double val) { fKEllipseUnreacted = val; }
     void SetKOpa(double val) { fKOpa = val; }
 
+    /// Erel window applied to fragment (outgoing) events. A limit of -1
+    /// disables that side, so (-1, -1) means no Erel cut at all.
+    void SetErelLimits(double min, double max)
+    {
+        fErelMin = min;
+        fErelMax = max;
+    }
+
     void SetVerbose(bool v) { fVerbose = v; }
 
     // --- Tree loading
@@ -187,6 +196,7 @@ public:
     ///   - k_ellipse  in [kEllipseMin, kEllipseMax]  (same k for fragment & unreacted)
     ///   - k_opa      in [kOpaMin, kOpaMax]
     ///   - effToTeffp2p in [effP2PMin, effP2PMax]
+    /// The Erel window (if set) stays fixed across all iterations.
     /// Returns the histogram of cross-section values (caller owns it).
     TH1F *ComputeCrossSectionSystematics(int N = 10000,
                                          double kEllipseMin = 2.0, double kEllipseMax = 3.0,
@@ -210,6 +220,10 @@ private:
     double fKEllipseUnreacted = 3.0;
     double fKOpa = 3.0;
 
+    // --- Erel window on fragment events (-1 => that side disabled)
+    double fErelMin = -1.0;
+    double fErelMax = -1.0;
+
     double fEffToTeffp2p = 0.566897;
     double fEffFrag = 0.9853;
     double fReactionRate = 0.0024;
@@ -231,7 +245,7 @@ private:
     std::map<TString, Fit2DParams> fFitCache;
 
     // --- Internal helpers
-    TreeData LoadTreeData(TTree *tree, bool loadOpa);
+    TreeData LoadTreeData(TTree *tree, bool loadOpa, bool loadErel = false);
     int fOpaCallCount = 0;
 
     OpaCutResults FitOpaHistogram(TH1F *h, double kRoi, bool storeFit = false);
