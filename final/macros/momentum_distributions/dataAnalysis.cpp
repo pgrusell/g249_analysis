@@ -6,7 +6,7 @@ DataAnalysis::DataAnalysis(std::string dataFilePath, std::string outFileName, bo
     fHasNeutrons = hasNeutrons;
     fOutFileName = outFileName;
 
-    fErel = new TH1F("fErel", "Erel", 100, 0, 10);
+    fErel = new TH1F("fErel", "Erel", 100, -5, 10);
     fDeltaBeta = new TH1F("fDeltaBeta", "#Delta#beta", 100, -0.3, 0.3);
 }
 
@@ -145,6 +145,8 @@ void DataAnalysis::getData(bool called)
 
     if (called)
     {
+        tout->Branch("AoQ_frag", &AoQ_frag);
+        tout->Branch("Z_frag_est", &Z_frag_est);
         tout->Branch("beta_frag", &beta_f_out);
         tout->Branch("fx_frag", &fx_frag);
         tout->Branch("fy_frag", &fy_frag);
@@ -237,7 +239,7 @@ void DataAnalysis::getData(bool called)
                                  (1.0 - beta_neu * beta_frag * cos_ang)) -
                    m_f - m_neut;
 
-            fErel->Fill(Erel);
+            fErel->Fill(Erel * 1000);
             fDeltaBeta->Fill(beta_frag - beta_neu);
 
             beta_n_out = beta_neu;

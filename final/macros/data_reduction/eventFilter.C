@@ -177,6 +177,14 @@ static ReactionConfig makeReactionConfig(const TString &reaction)
 
         if (reaction == "25F23O")
         {
+
+                ////// VERY IMPORTANT CHANGE THISSSSS 23O HAS NEUTRONSSSS
+                /*
+                cfg = {2.785, 2.88,
+                       23.015696686 - 8 * 0.00511,
+                       "data_23O", true, false};
+                */
+
                 cfg = {2.785, 2.88,
                        23.015696686 - 8 * 0.00511,
                        "data_23O", true, false};
@@ -327,34 +335,33 @@ static ROOT::RDF::RNode defineFootColumns(ROOT::RDF::RNode node)
         return node;
 }
 
-/// Generic best-hit extractor for a single fiber detector using GetHitIndexByName.
+/// Generic best-hit extractor for a single fiber detector: picks the hit with highest Eloss.
 static ROOT::RDF::RNode defineSingleFiber(ROOT::RDF::RNode node,
                                           const std::string &hitBranch,
                                           const std::string &prefix,
                                           const std::string &elossName,
-                                          double xOffset,
-                                          const std::string &trackBranch,
-                                          const std::string &hitName)
+                                          double xOffset)
 {
         const std::string arrCol = prefix + "_best";
 
         node = node.Define(arrCol,
-                           [xOffset, hitName](TClonesArray &trks, TClonesArray &hits)
+                           [xOffset](TClonesArray &hits)
                            {
                 std::array<double, 3> res = {-999.0, -999.0, -999.0};
+                double bestEloss = -1.0;
 
-                if (trks.GetEntriesFast() > 0)
+                for (int i = 0; i < hits.GetEntriesFast(); ++i)
                 {
-                    auto *trk = static_cast<R3BTrackingParticle *>(trks.UncheckedAt(0));
-                    int idx = trk->GetHitIndexByName(hitName.c_str());
-                    if (idx >= 0 && idx < hits.GetEntriesFast())
+                    auto *hit = static_cast<R3BFiberMAPMTHitData *>(hits.UncheckedAt(i));
+                    double eloss = hit->GetEloss();
+                    if (eloss > bestEloss)
                     {
-                        auto *hit = static_cast<R3BFiberMAPMTHitData *>(hits.UncheckedAt(idx));
-                        res = {hit->GetX() + xOffset, hit->GetY(), hit->GetEloss()};
+                        bestEloss = eloss;
+                        res = {hit->GetX() + xOffset, hit->GetY(), eloss};
                     }
                 }
 
-                return res; }, {trackBranch, hitBranch});
+                return res; }, {hitBranch});
 
         node = node.Define(prefix + "X",
                            [](const std::array<double, 3> &a)
@@ -371,17 +378,10 @@ static ROOT::RDF::RNode defineSingleFiber(ROOT::RDF::RNode node,
 /// All four fiber detectors + ToFD
 static ROOT::RDF::RNode defineFibersAndTofd(ROOT::RDF::RNode node)
 {
-        // Fi30 and Fi31: incoming fibers -> IncomingTrackFoot
-        node = defineSingleFiber(node, "Fi30Hit", "fib30", "ElossFib30", 0.0,
-                                 "IncomingTrackFoot", "Fi30Hit");
-        node = defineSingleFiber(node, "Fi31Hit", "fib31", "ElossFib31", FIB31_OFF,
-                                 "IncomingTrackFoot", "Fi31Hit");
-
-        // Fi32 and Fi33: outgoing fibers -> OutgoingTrackFoot
-        node = defineSingleFiber(node, "Fi32Hit", "fib32", "ElossFib32", 0.0,
-                                 "OutgoingTrackFoot", "Fi32Hit");
-        node = defineSingleFiber(node, "Fi33Hit", "fib33", "ElossFib33", FIB33_OFF,
-                                 "OutgoingTrackFoot", "Fi33Hit");
+        node = defineSingleFiber(node, "Fi30Hit", "fib30", "ElossFib30", 0.0);
+        node = defineSingleFiber(node, "Fi31Hit", "fib31", "ElossFib31", FIB31_OFF);
+        node = defineSingleFiber(node, "Fi32Hit", "fib32", "ElossFib32", 0.0);
+        node = defineSingleFiber(node, "Fi33Hit", "fib33", "ElossFib33", FIB33_OFF);
 
         node = node.Define("tofdX", [](TClonesArray &t)
                            {
@@ -452,10 +452,7 @@ static Top2Clusters findTop2Clusters(TClonesArray &clu,
                 return c;
 
         double dphiDeg = std::abs(TVector2::Phi_mpi_pi(c.ph2 - c.ph1)) * TMath::RadToDeg();
-        // if (std::abs(dphiDeg - 180.0) > 30.0)
-        //         return c;
-
-        if (std::abs(dphiDeg - 180.0) > 60.0)
+        if (std::abs(dphiDeg - 180.0) > 30.0)
                 return c;
 
         c.good = true;
@@ -485,7 +482,11 @@ static ROOT::RDF::RNode defineCalifaColumns(ROOT::RDF::RNode node)
                    .Define("califa_theta_R", [](bool sw, const Top2Clusters &c)
                            { return (!c.good) ? -999.0 : (sw ? c.th1 : c.th2); }, {"califa_swap", "califa_top2"})
                    .Define("califa_phi_R", [](bool sw, const Top2Clusters &c)
-                           { return (!c.good) ? -999.0 : (sw ? c.ph1 : c.ph2); }, {"califa_swap", "califa_top2"});
+                           { return (!c.good) ? -999.0 : (sw ? c.ph1 : c.ph2); }, {"califa_swap", "califa_top2"})
+                   .Define("califa_energy_L", [](bool sw, const Top2Clusters &c)
+                           { return (!c.good) ? -999.0 : (sw ? c.e2 : c.e1); }, {"califa_swap", "califa_top2"})
+                   .Define("califa_energy_R", [](bool sw, const Top2Clusters &c)
+                           { return (!c.good) ? -999.0 : (sw ? c.e1 : c.e2); }, {"califa_swap", "califa_top2"});
 
         return node.Filter([](double opa)
                            { return opa > -990.0; },
@@ -582,8 +583,8 @@ static std::vector<std::string> buildOutputColumns(bool hasNeutrons)
                 cols.insert(cols.end(), {"beta_neu", "p_neu"});
 
         cols.insert(cols.end(), {"califa_opa",
-                                 "califa_theta_L", "califa_phi_L",
-                                 "califa_theta_R", "califa_phi_R",
+                                 "califa_theta_L", "califa_phi_L", "califa_energy_L",
+                                 "califa_theta_R", "califa_phi_R", "califa_energy_R",
                                  "px_frag", "py_frag", "pz_frag",
                                  "beta_proj"});
 
@@ -616,7 +617,7 @@ void eventFilter(std::string setting = "",
                  bool test = false,
                  bool append = false)
 {
-        ROOT::EnableImplicitMT(16);
+        // ROOT::EnableImplicitMT(1);
 
         // ── Load file list ──────────────────────────────────────────────────
         const std::string listTxt =
@@ -644,12 +645,12 @@ void eventFilter(std::string setting = "",
                 return;
         }
 
-        std::string outFileName = cfg.outName + (test ? "_test_60opa" : "") + ".root";
+        std::string outFileName = cfg.outName + (test ? "_test" : "") + ".root";
         double M_FRAG_GeV = cfg.massAMU * AMU_GeV;
 
         // ── Open output file ────────────────────────────────────────────────
         std::string outFile =
-            std::string(getenv("repopath")) + "/results/final/" + outFileName;
+            std::string(getenv("repopath")) + "/results/dataFiles/" + outFileName;
         bool exists = (gSystem->AccessPathName(outFile.c_str()) == kFALSE);
         TFile *fout = new TFile(outFile.c_str(),
                                 (append && exists) ? "UPDATE" : "RECREATE");

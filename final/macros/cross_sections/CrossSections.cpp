@@ -7,7 +7,7 @@ CrossSections::~CrossSections() {}
 // Tree loading
 // ------
 
-TreeData CrossSections::LoadTreeData(TTree *tree, bool loadOpa)
+TreeData CrossSections::LoadTreeData(TTree *tree, bool loadOpa, bool loadErel)
 {
     TreeData d;
     const Long64_t n = tree->GetEntries();
@@ -15,18 +15,25 @@ TreeData CrossSections::LoadTreeData(TTree *tree, bool loadOpa)
     d.AoQ_frag.resize(n);
     if (loadOpa)
         d.califa_opa.resize(n);
+    if (loadErel)
+        d.Erel.resize(n);
 
     tree->SetBranchStatus("*", 0);
     tree->SetBranchStatus("Z_frag_est", 1);
     tree->SetBranchStatus("AoQ_frag", 1);
 
-    double z = 0, aoq = 0, opa = 0;
+    double z = 0, aoq = 0, opa = 0, erel = 0;
     tree->SetBranchAddress("Z_frag_est", &z);
     tree->SetBranchAddress("AoQ_frag", &aoq);
     if (loadOpa)
     {
         tree->SetBranchStatus("califa_opa", 1);
         tree->SetBranchAddress("califa_opa", &opa);
+    }
+    if (loadErel)
+    {
+        tree->SetBranchStatus("Erel", 1);
+        tree->SetBranchAddress("Erel", &erel);
     }
 
     for (Long64_t i = 0; i < n; ++i)
@@ -36,6 +43,8 @@ TreeData CrossSections::LoadTreeData(TTree *tree, bool loadOpa)
         d.AoQ_frag[i] = aoq;
         if (loadOpa)
             d.califa_opa[i] = opa;
+        if (loadErel)
+            d.Erel[i] = erel;
     }
 
     tree->SetBranchStatus("*", 1);
@@ -81,9 +90,9 @@ void CrossSections::SetTrees(TString fileNameFragment, TString fileNameUnreacted
     }
 
     std::cout << "[INFO] Loading fragment (outgoing) tree...\n";
-    fDataFragment = LoadTreeData(tFrag, /*loadOpa=*/true);
+    fDataFragment = LoadTreeData(tFrag, /*loadOpa=*/true, /*loadErel=*/true);
     std::cout << "[INFO] Loading unreacted (incoming) tree...\n";
-    fDataUnreacted = LoadTreeData(tUnr, /*loadOpa=*/false);
+    fDataUnreacted = LoadTreeData(tUnr, /*loadOpa=*/false, /*loadErel=*/false);
     fTreesLoaded = true;
 
     std::cout << "[INFO] Trees loaded. fragment=" << fDataFragment.Z_frag_est.size()
@@ -248,7 +257,7 @@ double CrossSections::RunFit2DForNucleus(TString nuc, double k)
 
     Fit2DParams pars = Fit2D(nuc, aoqmin, aoqmax, zmin, zmax, files, "FilterDataTree", nBins);
 
-    if (nuc == "24O")
+    if (nuc == "24O" || nuc == "23O")
     {
         fMuZ_Fragment = pars.muZ;
         fMuAoQ_Fragment = pars.muAoQ;
@@ -346,7 +355,16 @@ void CrossSections::LoadFitCache(TString fileName)
     in.close();
     std::cout << "[INFO] Fit cache loaded from " << fileName << " (" << count << " entries)\n";
 
-    if (fFitCache.count("24O"))
+    // Fragment params: prefer 23O (current port), fall back to 24O for old caches.
+    if (fFitCache.count("23O"))
+    {
+        const auto &p = fFitCache["23O"];
+        fMuZ_Fragment = p.muZ;
+        fMuAoQ_Fragment = p.muAoQ;
+        fSigmaZ_Fragment = p.sigmaZ;
+        fSigmaAoQ_Fragment = p.sigmaAoQ;
+    }
+    else if (fFitCache.count("24O"))
     {
         const auto &p = fFitCache["24O"];
         fMuZ_Fragment = p.muZ;
@@ -625,6 +643,12 @@ TH1F *CrossSections::BuildOpaHistogram(const TreeData &data,
     const double dZ2 = (kEllipse * sigmaZ) * (kEllipse * sigmaZ);
     const double dAoQ2 = (kEllipse * sigmaAoQ) * (kEllipse * sigmaAoQ);
 
+    // Erel window: a limit of -1 disables that side. Only applied if the
+    // Erel branch was actually loaded for this data set.
+    const bool cutErelLow = (fErelMin != -1.0);
+    const bool cutErelHigh = (fErelMax != -1.0);
+    const bool hasErel = !data.Erel.empty();
+
     TString hname = Form("hOpaBuilt_%d", uniqueId);
     auto *h = new TH1F(hname, "", 125, 0, 3);
     h->SetDirectory(nullptr);
@@ -632,6 +656,15 @@ TH1F *CrossSections::BuildOpaHistogram(const TreeData &data,
     const std::size_t n = data.Z_frag_est.size();
     for (std::size_t i = 0; i < n; ++i)
     {
+        if (hasErel)
+        {
+            const double e = data.Erel[i];
+            if (cutErelLow && e < fErelMin)
+                continue;
+            if (cutErelHigh && e > fErelMax)
+                continue;
+        }
+
         const double dz = data.Z_frag_est[i] - muZ;
         const double daoq = data.AoQ_frag[i] - muAoQ;
         if (dz * dz / dZ2 + daoq * daoq / dAoQ2 <= 1.0)
@@ -802,7 +835,8 @@ TH1F *CrossSections::ComputeCrossSectionSystematics(int N,
         // 3) Temporarily set fEffToTeffp2p to the sampled value
         fEffToTeffp2p = effP2P;
 
-        // 4) Outgoing: OPA cut with the sampled kEll (PID ellipse) and kOpa
+        // 4) Outgoing: OPA cut with the sampled kEll (PID ellipse) and kOpa.
+        //    The Erel window (fErelMin/fErelMax) stays fixed across iterations.
         auto opa = CalculateOpaLimits(fDataFragment, effEll1,
                                       fMuZ_Fragment, fMuAoQ_Fragment,
                                       fSigmaZ_Fragment, fSigmaAoQ_Fragment,

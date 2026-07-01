@@ -4,8 +4,58 @@ void checkTransmissions()
     gStyle->SetCanvasPreferGL();
     Int_t ciBg = TColor::GetColor("#f9f9f9");
 
-    const char *file24 = "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/data_24O_test.root";
-    const char *file25 = "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/data_25F_test.root";
+    const char *file24 = "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/data_24O.root";
+    const char *file25 = "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/data_25F.root";
+
+    // Unreacted cuts
+    auto *unreacted_25f_cut = new TCutG("unreacted_25f_cut", 23);
+    unreacted_25f_cut->SetPoint(0, 2.74329, 8.48631);
+    unreacted_25f_cut->SetPoint(1, 2.75374, 8.55453);
+    unreacted_25f_cut->SetPoint(2, 2.7594, 8.66688);
+    unreacted_25f_cut->SetPoint(3, 2.76376, 8.80331);
+    unreacted_25f_cut->SetPoint(4, 2.76637, 8.92368);
+    unreacted_25f_cut->SetPoint(5, 2.7655, 9.04005);
+    unreacted_25f_cut->SetPoint(6, 2.76289, 9.15642);
+    unreacted_25f_cut->SetPoint(7, 2.75853, 9.26877);
+    unreacted_25f_cut->SetPoint(8, 2.75418, 9.3731);
+    unreacted_25f_cut->SetPoint(9, 2.74939, 9.4373);
+    unreacted_25f_cut->SetPoint(10, 2.7446, 9.48545);
+    unreacted_25f_cut->SetPoint(11, 2.73937, 9.48545);
+    unreacted_25f_cut->SetPoint(12, 2.73153, 9.45736);
+    unreacted_25f_cut->SetPoint(13, 2.72413, 9.36507);
+    unreacted_25f_cut->SetPoint(14, 2.71934, 9.23667);
+    unreacted_25f_cut->SetPoint(15, 2.71542, 9.08018);
+    unreacted_25f_cut->SetPoint(16, 2.71454, 8.9598);
+    unreacted_25f_cut->SetPoint(17, 2.71454, 8.83139);
+    unreacted_25f_cut->SetPoint(18, 2.72064, 8.65885);
+    unreacted_25f_cut->SetPoint(19, 2.72979, 8.53045);
+    unreacted_25f_cut->SetPoint(20, 2.7385, 8.47427);
+    unreacted_25f_cut->SetPoint(21, 2.74285, 8.47026);
+    unreacted_25f_cut->SetPoint(22, 2.74329, 8.48631);
+    unreacted_25f_cut->SetVarX("AoQ_frag");
+    unreacted_25f_cut->SetVarY("Z_frag_est");
+
+    // 24O cuts
+    auto *reacted_23o_cutg = new TCutG("reacted_23o_cutg", 13);
+    reacted_23o_cutg->SetVarX("AoQ_frag");
+    reacted_23o_cutg->SetVarY("Z_frag_est");
+    reacted_23o_cutg->SetTitle("Graph");
+    reacted_23o_cutg->SetFillStyle(1000);
+    reacted_23o_cutg->SetPoint(0, 2.78967, 8.38836);
+    reacted_23o_cutg->SetPoint(1, 2.78589, 8.14281);
+    reacted_23o_cutg->SetPoint(2, 2.794, 7.85634);
+    reacted_23o_cutg->SetPoint(3, 2.81074, 7.68753);
+    reacted_23o_cutg->SetPoint(4, 2.85233, 7.67218);
+    reacted_23o_cutg->SetPoint(5, 2.87663, 7.83588);
+    reacted_23o_cutg->SetPoint(6, 2.87933, 8.11212);
+    reacted_23o_cutg->SetPoint(7, 2.87231, 8.30139);
+    reacted_23o_cutg->SetPoint(8, 2.85503, 8.5009);
+    reacted_23o_cutg->SetPoint(9, 2.83612, 8.56229);
+    reacted_23o_cutg->SetPoint(10, 2.80966, 8.52648);
+    reacted_23o_cutg->SetPoint(11, 2.79616, 8.44463);
+    reacted_23o_cutg->SetPoint(12, 2.78967, 8.38836);
+    reacted_23o_cutg->SetVarX("AoQ_frag");
+    reacted_23o_cutg->SetVarY("Z_frag_est");
 
     TFile *f24 = TFile::Open(file24);
     TFile *f25 = TFile::Open(file25);
@@ -30,9 +80,9 @@ void checkTransmissions()
 
     // 3sigma elliptical identification cuts (same parameters as calculateCrossSections.C)
     // 24O data: Z = 8.06, AoQ = 2.958, + opening-angle cut on CALIFA
-    const TString cut24 = "califa_opa>1.35&&califa_opa<1.65";
+    const TString cut24 = "califa_opa>1.25&&califa_opa<1.65 && reacted_23o_cutg";
     // 25F data: Z = 8.97, AoQ = 2.740
-    const TString cut25 = "";
+    const TString cut25 = "unreacted_25f_cut";
 
     // --- Canvas 1a: Foots charge ---
     TCanvas *cFootsCharge = new TCanvas("cFootsCharge", "Foots Charge: 24O vs 25F", 800, 700);

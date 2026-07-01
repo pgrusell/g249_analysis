@@ -1,10 +1,3 @@
-// ===========================================================================
-// COMMON HELPERS (used by both test() and fitMomdisBootstrap())
-// ===========================================================================
-
-// ---------------------------------------------------------------------------
-// Container for theoretical momentum distributions.
-// ---------------------------------------------------------------------------
 struct MomentaDist
 {
     TH1F *Qz = nullptr;
@@ -13,10 +6,6 @@ struct MomentaDist
     TH1F *Q = nullptr;
 };
 
-// ---------------------------------------------------------------------------
-// Read a theoretical momentum distribution from a two-column text file.
-// (LEGACY format: Qi  Qt). Extracts the transverse component into .Qt
-// ---------------------------------------------------------------------------
 MomentaDist getMomentaDistFromtxt(std::string txtFile, std::string histName)
 {
     MomentaDist momdis;
@@ -49,26 +38,6 @@ MomentaDist getMomentaDistFromtxt(std::string txtFile, std::string histName)
     return momdis;
 }
 
-// ---------------------------------------------------------------------------
-// Read a theoretical momentum distribution from a MULTI-COLUMN text file
-// (the "JT 5-column" format):
-//
-//   <total cross section>
-//   <blank line(s)>
-//   Momentum distributions
-//     Q_i      dS/dQ_z   dS/dQ_t   dS/dQ_y   dS/dQ
-//   (MeV/C)  (mb/MeV/c) (mb/MeV/c) (mb/MeV/c) (mb/MeV/c)
-//   -986.635   0.00000  0.95E-05  0.17E-06  0.24E-05
-//   ...
-//
-// Column layout:  Q_i  dS/dQ_z  dS/dQ_t  dS/dQ_y  dS/dQ
-//
-// For this format the fit (both px and py) is performed against the
-// dS/dQ_y column (4th column). We store that distribution in the .Qt
-// slot of MomentaDist, because that is the field the downstream code
-// (buildTemplate / create_pdf_from_histogram) reads from. The slot name
-// is historical; the *content* here is dS/dQ_y.
-// ---------------------------------------------------------------------------
 MomentaDist getMomentaDistFromtxtMultiCol(std::string txtFile, std::string histName)
 {
     MomentaDist momdis;
@@ -111,10 +80,8 @@ MomentaDist getMomentaDistFromtxtMultiCol(std::string txtFile, std::string histN
 }
 
 // ---------------------------------------------------------------------------
-// Dispatcher: pick the reader based on a format flag.
 //   format == 0  ->  two-column  (legacy: Qi Qt)             -> extracts Qt
 //   format == 1  ->  multi-column (JT 5-col)                 -> extracts Qy
-// In both cases the chosen distribution is returned in momdis.Qt.
 // ---------------------------------------------------------------------------
 MomentaDist getMomentaDist(std::string txtFile, std::string histName, int format)
 {
@@ -243,10 +210,6 @@ RooHistPdf *create_pdf_from_histogram(RooRealVar &x, TH1F *h)
     return pdf;
 }
 
-// ---------------------------------------------------------------------------
-// Fit a binned dataset to a sum of templates with the recursive-fraction
-// RooAddPdf convention. Returns physical fractions (phi_0, ..., phi_{N-1}).
-// ---------------------------------------------------------------------------
 std::vector<double> make_fit(RooDataHist *data,
                              std::vector<RooHistPdf *> theory,
                              RooRealVar &x,
@@ -298,9 +261,6 @@ std::vector<double> make_fit(RooDataHist *data,
     return trueCoefs;
 }
 
-// ---------------------------------------------------------------------------
-// Poissonian bootstrap of an observed histogram.
-// ---------------------------------------------------------------------------
 TH1F *boostrapPoisson(TH1F *h)
 {
     TH1F *h2 = static_cast<TH1F *>(h->Clone());
@@ -322,14 +282,8 @@ std::vector<double> getQuantiles(TH1F *h)
     return {xp[0], xp[1]};
 }
 
-// Keep the original API name (used by test()) as an alias.
 inline std::vector<double> getUncertainties(TH1F *h) { return getQuantiles(h); }
 
-// ---------------------------------------------------------------------------
-// Bootstrap: Poisson fluctuations on the observed histogram, refit each toy.
-// Fills parDistributions and returns interleaved {q16,q84} per parameter.
-// 'tag' makes RooFit object names unique across calls.
-// ---------------------------------------------------------------------------
 std::vector<double> calculateUncertainties(RooDataHist *data,
                                            std::vector<RooHistPdf *> theory,
                                            RooRealVar &x,
@@ -374,10 +328,6 @@ std::vector<double> calculateUncertainties(RooDataHist *data,
     return unc;
 }
 
-// ---------------------------------------------------------------------------
-// Truth resampling: independent datasets from the true model, refit each.
-// Returns one fitted-value distribution per parameter.
-// ---------------------------------------------------------------------------
 std::vector<TH1F *> sampleFromTruth(RooAbsPdf &trueModel,
                                     std::vector<RooHistPdf *> theory,
                                     RooRealVar &x,
@@ -406,10 +356,6 @@ std::vector<TH1F *> sampleFromTruth(RooAbsPdf &trueModel,
     return dists;
 }
 
-// ---------------------------------------------------------------------------
-// Build an RooAddPdf with FIXED recursive coefficients matching the given
-// physical fractions. Used to plot the best-fit model and compute chi2.
-// ---------------------------------------------------------------------------
 RooAddPdf *buildFixedModel(std::vector<RooHistPdf *> theory,
                            const std::vector<double> &phi,
                            std::vector<RooRealVar *> &storedCoefs,
@@ -450,9 +396,6 @@ RooAddPdf *buildFixedModel(std::vector<RooHistPdf *> theory,
                          pdfs, coeffs, kTRUE);
 }
 
-// ---------------------------------------------------------------------------
-// Analytic chi2: sum_i (N_obs - N_exp)^2 / N_exp ; ndf = nBinsUsed - nC.
-// ---------------------------------------------------------------------------
 void computeChi2(TH1F *h_data, RooAbsPdf *fitModel, RooRealVar &x,
                  int nC, std::string rangeTag,
                  double &chi2, int &ndf, int &nBinsUsed)
@@ -483,9 +426,6 @@ void computeChi2(TH1F *h_data, RooAbsPdf *fitModel, RooRealVar &x,
     ndf = nBinsUsed - nC;
 }
 
-// ---------------------------------------------------------------------------
-// Fit + residual canvas for one momentum component (used by real-data fit).
-// ---------------------------------------------------------------------------
 void drawFitCanvas(const std::string &cName, const std::string &cTitle,
                    const std::string &axisTitle,
                    TH1F *h_data, RooDataHist *data,
@@ -624,9 +564,6 @@ void drawFitCanvas(const std::string &cName, const std::string &cTitle,
     c->Update();
 }
 
-// ---------------------------------------------------------------------------
-// Bootstrap distributions on one canvas (real-data version: bootstrap only).
-// ---------------------------------------------------------------------------
 void drawBootstrapCanvas(const std::string &cName, const std::string &cTitle,
                          std::vector<TH1F *> bootDists,
                          const std::vector<double> &phi,
@@ -685,18 +622,6 @@ void drawBootstrapCanvas(const std::string &cName, const std::string &cTitle,
     c->Update();
 }
 
-// ===========================================================================
-// 1) test(): toy validation
-//
-// Generates pseudo-data from a known mixture of the three theoretical
-// templates (d_{5/2}, s_{1/2}, p_{1/2}) and compares the bootstrap-based
-// uncertainty with the truth-resampling distribution. Useful to verify
-// that the bootstrap correctly reproduces the spread expected from
-// independent realizations of the true model.
-//
-// 'theoFormat' selects the theory-file reader (0 = legacy 2-col / Qt,
-//              1 = JT multi-col / Qy).
-// ===========================================================================
 void test(int theoFormat_gen = 0, // 1 = JT multi-col  (generador)
           int theoFormat_fit = 1) // 0 = legacy 2-col  (ajuste CB)
 {
@@ -743,6 +668,7 @@ void test(int theoFormat_gen = 0, // 1 = JT multi-col  (generador)
     for (int k = 0; k < nGen; k++)
     {
         auto md = getMomentaDist(inFilesGen[k], Form("gen_%d", k), theoFormat_gen);
+
         tmplGen[k] = buildTemplate(md.Qt, hRef, Form("tmpl_gen_%d", k));
         theoryGen[k] = create_pdf_from_histogram(x, tmplGen[k]);
     }
@@ -915,19 +841,6 @@ void test(int theoFormat_gen = 0, // 1 = JT multi-col  (generador)
     delete binnedData;
 }
 
-// ===========================================================================
-// 2) fitMomdis(): real-data analysis
-//
-// Reads px_rf_rot and py_rf_rot from the experimental ROOT file, fits each
-// to the theoretical templates, and obtains asymmetric uncertainties
-// from a Poisson bootstrap of the observed histogram. Also computes the
-// analytic chi2 and draws residuals.
-//
-// 'theoFormat' selects the theory-file reader:
-//   0 = legacy two-column  (Qi Qt)        -> uses the Qt column
-//   1 = JT multi-column    (Qi Qz Qt Qy Q)-> uses the Qy column for
-//                                            BOTH the px and py fits
-// ===========================================================================
 void fitMomdis(double erelMin = 1.5, double erelMax = 4,
                int nToys = 1000, int theoFormat = 0)
 {
@@ -956,9 +869,9 @@ void fitMomdis(double erelMin = 1.5, double erelMax = 4,
         "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/23O_analyzed_test.root";
 
     const int nC = (int)inFilesTheo.size();
-    const int nBinsRef = 30;
-    const double maxBin = 300.0;
-    const bool useErelCut = !(erelMin < 0 && erelMax < 0); 
+    const int nBinsRef = 5;
+    const double maxBin = 100.0;
+    const bool useErelCut = !(erelMin < 0 && erelMax < 0);
 
     // ---------------------------------------------------------------------
     // Experimental histograms for px and py

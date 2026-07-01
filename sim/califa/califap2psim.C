@@ -76,7 +76,7 @@ void califap2psim(Int_t kIter = 1)
     run->AddModule(foots);
 
     // --------------- CALIFA ------------------------------------
-    auto *calsim = new R3BCalifa("califa_v2025.6.geo.root", {0., 0., -4.});
+    auto *calsim = new R3BCalifa("califa_v2025.6.geo.root", {0., 0., -2.});
     calsim->SelectGeometryVersion(2025);
     run->AddModule(calsim);
 
@@ -92,7 +92,7 @@ void califap2psim(Int_t kIter = 1)
     primGen->AddGenerator(gen);
 
     run->SetGenerator(primGen);
-    run->SetStoreTraj(false);
+    run->SetStoreTraj(true);
 
     FairLogger::GetLogger()->SetLogVerbosityLevel("LOW");
     FairLogger::GetLogger()->SetLogScreenLevel("warn");

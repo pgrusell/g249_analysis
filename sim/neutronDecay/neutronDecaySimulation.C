@@ -7,8 +7,8 @@
 #include "GladNeulandGeometry.h"
 #include "../utils/AsciiFileGenerator.h"
 
-void neutronDecaySimulation(Int_t nEvents = 10000,
-                            TString asciiFile = "O24_2n_res1")
+void neutronDecaySimulation(Int_t nEvents = 1000000,
+                            TString asciiFile = "neutron_decay_fullErel")
 {
 
     // paths
