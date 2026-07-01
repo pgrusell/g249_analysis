@@ -6,14 +6,15 @@ void runCrossSections(TString mode = "scratch",
                       double kOpa = 3.5,
                       int nIterations = 1000)
 {
-    const TString fileFragment = "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/data_24O_test3.root";
-    const TString fileUnreacted = "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/data_25F_test3.root";
+    const TString fileFragment = "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/data_23O_test.root";
+    const TString fileUnreacted = "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/data_25Fp2p_test.root";
 
     CrossSections xs;
     xs.SetVerbose(true);
     xs.SetKEllipseFragment(2.5);
     xs.SetKEllipseUnreacted(2.5);
     xs.SetKOpa(3.5);
+    // xs.SetErelLimits(0.0, 0.5);
 
     // Load trees (needed by all modes)
     xs.SetTrees(fileFragment, fileUnreacted);
@@ -48,10 +49,10 @@ void runCrossSections(TString mode = "scratch",
             std::cout << "25F: muZ=" << p.muZ << " sigmaZ=" << p.sigmaZ
                       << " muAoQ=" << p.muAoQ << " sigmaAoQ=" << p.sigmaAoQ << "\n";
         }
-        if (xs.HasCachedFit("24O"))
+        if (xs.HasCachedFit("23O"))
         {
-            auto p = xs.GetCachedFit("24O");
-            std::cout << "24O: muZ=" << p.muZ << " sigmaZ=" << p.sigmaZ
+            auto p = xs.GetCachedFit("23O");
+            std::cout << "23O: muZ=" << p.muZ << " sigmaZ=" << p.sigmaZ
                       << " muAoQ=" << p.muAoQ << " sigmaAoQ=" << p.sigmaAoQ << "\n";
         }
 
