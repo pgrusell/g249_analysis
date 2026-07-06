@@ -29,6 +29,13 @@ static constexpr double C_CM_PER_NS = 29.9792458;
 static constexpr double FIB33_OFF = 25.;
 static constexpr double FIB31_OFF = -25.;
 
+// ─── CALIFA gamma-cluster selection (lab-frame cluster energies, keV) ───────
+// Lower bound: matches the experimental gamma-cluster threshold : 100 keV
+// Upper bound: the proton-cluster threshold already used in this macro : 20e3 keV 
+ 
+static constexpr double CALIFA_GAMMA_EMIN = 100.;   // keV
+static constexpr double CALIFA_GAMMA_EMAX = 20.e3;  // keV
+
 // ─── 25F incoming graphical cut (polygon from TCutG) ────────────────────────
 static const std::vector<std::pair<double, double>> INCOMING_25F_POLYGON = {
     {2.77227, 8.55258},
@@ -81,6 +88,16 @@ struct ReactionConfig
         double ell_mu_Z = 0;
         double ell_sig_Z = 0;
         double ell_k = 0;
+
+        // Optional elliptical incoming-PID cut.
+        // When false, the incoming selection falls back to the default 25F
+        // graphical-cut polygon (INCOMING_25F_POLYGON / isGoodIncoming).
+        bool useIncomingEllipse = false;
+        double in_mu_AoQ = 0;
+        double in_sig_AoQ = 0;
+        double in_mu_Z = 0;
+        double in_sig_Z = 0;
+        double in_k = 0;
 };
 
 /// CALIFA top-2 cluster result
@@ -88,6 +105,16 @@ struct Top2Clusters
 {
         double e1, th1, ph1, e2, th2, ph2;
         bool good;
+};
+
+/// CALIFA gamma-cluster collection (all clusters in the gamma energy band).
+/// Parallel vectors, one entry per gamma cluster, in keV / rad.
+struct GammaClusters
+{
+        std::vector<double> e;     // cluster energy   [keV] (lab frame)
+        std::vector<double> theta; // cluster centroid theta [rad]
+        std::vector<double> phi;   // cluster centroid phi   [rad]
+        std::vector<int>    crystalID; // mother-crystal ID (for exact geometry lookup)
 };
 
 // ─── Free helpers ───────────────────────────────────────────────────────────
@@ -185,7 +212,7 @@ static ReactionConfig makeReactionConfig(const TString &reaction)
         {
                 cfg = {2.67, 2.755,
                        22.009965744 - 8.0 * 0.00511,
-                       "data_22O", true, false};
+                       "data_22O", true, false};      //first true/false is for hasNeutrons
         }
         else if (reaction == "25F24O")
         {
@@ -201,6 +228,22 @@ static ReactionConfig makeReactionConfig(const TString &reaction)
                        24.019861000 - 8 * 0.00511,
                        "data_25Fp2p", false, false};
         }
+        else if (reaction == "23F22O")
+        {
+                // only the INCOMING species
+                // differs, so it is gated by an incoming 23F ellipse below.
+                cfg = {2.67, 2.755,
+                       22.009965744 - 8.0 * 0.00511,
+                       "data_23Fp2p22O", false, false};
+
+                // Incoming 23F gate (AoQ-Z plane):
+                cfg.useIncomingEllipse = true;
+                cfg.in_mu_AoQ = 2.666;
+                cfg.in_sig_AoQ = 0.002396;
+                cfg.in_mu_Z = 8.986;
+                cfg.in_sig_Z = 0.2862;
+                cfg.in_k = 3.;
+        }
         else if (reaction == "25F25F")
         {
                 cfg = {2.71, 2.77,
@@ -214,8 +257,8 @@ static ReactionConfig makeReactionConfig(const TString &reaction)
 
 // ─── Reusable RDataFrame column builders ────────────────────────────────────
 
-/// FRS incoming columns + filter (now uses graphical cut polygon)
-static ROOT::RDF::RNode defineFrsIncoming(ROOT::RDF::RNode node)
+/// FRS incoming columns (no filter — call applyFrsIncomingFilter separately).
+static ROOT::RDF::RNode defineFrsColumns(ROOT::RDF::RNode node)
 {
         return node
             .Define("in_AoQ", [](TClonesArray &f)
@@ -223,10 +266,21 @@ static ROOT::RDF::RNode defineFrsIncoming(ROOT::RDF::RNode node)
             .Define("in_Z", [](TClonesArray &f)
                     { return ((R3BFrsData *)f.UncheckedAt(0))->GetZ(); }, {"FrsData"})
             .Define("beta_proj", [](TClonesArray &f)
-                    { return ((R3BFrsData *)f.UncheckedAt(0))->GetBeta(); }, {"FrsData"})
-            .Filter([](double aoq, double z)
-                    { return isGoodIncoming(aoq, z); },
-                    {"in_AoQ", "in_Z"}, "incoming 25F graphical cut");
+                    { return ((R3BFrsData *)f.UncheckedAt(0))->GetBeta(); }, {"FrsData"});
+}
+
+/// Incoming PID filter (polygon or ellipse depending on cfg).
+static ROOT::RDF::RNode applyFrsIncomingFilter(ROOT::RDF::RNode node, const ReactionConfig &cfg)
+{
+        const bool useEll = cfg.useIncomingEllipse;
+        const double mA = cfg.in_mu_AoQ, sA = cfg.in_sig_AoQ;
+        const double mZ = cfg.in_mu_Z, sZ = cfg.in_sig_Z, kk = cfg.in_k;
+        return node.Filter([=](double aoq, double z)
+                           {
+                                   if (useEll)
+                                           return insideEllipse(aoq, z, mA, sA, mZ, sZ, kk);
+                                   return isGoodIncoming(aoq, z); },
+                           {"in_AoQ", "in_Z"}, "incoming PID cut");
 }
 
 /// Outgoing fragment PID from MDF
@@ -415,6 +469,48 @@ static ROOT::RDF::RNode defineOutgoingStartPos(ROOT::RDF::RNode node)
                     { return p[2]; }, {"out_startpos"});
 }
 
+/// Reconstructed reaction VERTEX by closest approach (DCA) of the incoming and
+/// outgoing FOOT tracks — identical method to analyse_all_WR get_vertex().
+/// Produces vertex_x/y/z [cm] and vertex_dca [cm]. When either track is missing,
+/// all are set to the -999 sentinel.
+static ROOT::RDF::RNode defineReactionVertex(ROOT::RDF::RNode node)
+{
+        return node
+            .Define("vertex_vec",
+                    [](TClonesArray &intracks, TClonesArray &outtracks)
+                    {
+            std::array<double, 4> res = {-999.0, -999.0, -999.0, -999.0}; // x,y,z,dca
+            if (intracks.GetEntriesFast() == 0 || outtracks.GetEntriesFast() == 0)
+                return res;
+            auto *intrk  = (R3BTrackingParticle *)intracks.UncheckedAt(0);
+            auto *outtrk = (R3BTrackingParticle *)outtracks.UncheckedAt(0);
+            if (!intrk || !outtrk) return res;
+
+            const TVector3 pos1 = intrk->GetStartPosition();
+            const TVector3 pos2 = outtrk->GetStartPosition();
+            const TVector3 s1   = intrk->GetStartMomentum().Unit();
+            const TVector3 s2   = outtrk->GetStartMomentum().Unit();
+
+            // Closest approach of two lines (pos1,s1) and (pos2,s2).
+            const double s2s1 = s2.Dot(s1);
+            const double denom = 1.0 - s2s1 * s2s1;
+            if (std::abs(denom) < 1e-9) return res; // parallel tracks
+            const TVector3 dp = pos2 - pos1;
+            const double t = (-dp.Dot(s2) + dp.Dot(s1) * s2s1) / denom;
+            const double v = ( dp.Dot(s1) - dp.Dot(s2) * s2s1) / denom;
+            const TVector3 p1g = pos2 + t * s2;
+            const TVector3 p2g = pos1 + v * s1;
+            const TVector3 mid = 0.5 * (p1g + p2g);
+            const double dca = 0.5 * (p2g - p1g).Mag();
+
+            res = {mid.X(), mid.Y(), mid.Z(), dca};
+            return res; }, {"IncomingTrackFoot", "OutgoingTrackFoot"})
+            .Define("vertex_x",   [](const std::array<double, 4> &v) { return v[0]; }, {"vertex_vec"})
+            .Define("vertex_y",   [](const std::array<double, 4> &v) { return v[1]; }, {"vertex_vec"})
+            .Define("vertex_z",   [](const std::array<double, 4> &v) { return v[2]; }, {"vertex_vec"})
+            .Define("vertex_dca", [](const std::array<double, 4> &v) { return v[3]; }, {"vertex_vec"});
+}
+
 // ─── CALIFA ─────────────────────────────────────────────────────────────────
 
 static Top2Clusters findTop2Clusters(TClonesArray &clu,
@@ -459,6 +555,29 @@ static Top2Clusters findTop2Clusters(TClonesArray &clu,
         return c;
 }
 
+/// Collect all CALIFA clusters in the gamma energy band into parallel vectors.
+static GammaClusters collectGammaClusters(TClonesArray &clu,
+                                          double Emin = CALIFA_GAMMA_EMIN,
+                                          double Emax = CALIFA_GAMMA_EMAX)
+{
+        GammaClusters g;
+        for (int i = 0; i < clu.GetEntriesFast(); ++i)
+        {
+                auto *hit = (R3BCalifaClusterData *)clu.UncheckedAt(i);
+                double E = hit->GetEnergy();
+                if (E < Emin || E >= Emax)
+                        continue;
+                g.e.push_back(E);
+                g.theta.push_back(hit->GetTheta());
+                g.phi.push_back(hit->GetPhi());
+                // Mother crystal = first (highest-energy) crystal of the cluster.
+                // Used downstream to look up the EXACT crystal-centre position from
+                // R3BCalifaGeometry (no CALIFA-radius assumption in Doppler corr.).
+                g.crystalID.push_back(hit->GetMotherCrystal());
+        }
+        return g;
+}
+
 static ROOT::RDF::RNode defineCalifaColumns(ROOT::RDF::RNode node)
 {
         node = node
@@ -483,6 +602,22 @@ static ROOT::RDF::RNode defineCalifaColumns(ROOT::RDF::RNode node)
                            { return (!c.good) ? -999.0 : (sw ? c.th1 : c.th2); }, {"califa_swap", "califa_top2"})
                    .Define("califa_phi_R", [](bool sw, const Top2Clusters &c)
                            { return (!c.good) ? -999.0 : (sw ? c.ph1 : c.ph2); }, {"califa_swap", "califa_top2"});
+
+        // ── Gamma clusters (stored only if "good CALIFA event")──────────
+        node = node
+                   .Define("califa_gamma", [](TClonesArray &clu)
+                           { return collectGammaClusters(clu); },
+                           {"CalifaClusterData"})
+                   .Define("califa_gamma_E", [](const GammaClusters &g)
+                           { return g.e; }, {"califa_gamma"})
+                   .Define("califa_gamma_theta", [](const GammaClusters &g)
+                           { return g.theta; }, {"califa_gamma"})
+                   .Define("califa_gamma_phi", [](const GammaClusters &g)
+                           { return g.phi; }, {"califa_gamma"})
+                   .Define("califa_gamma_crystalID", [](const GammaClusters &g)
+                           { return g.crystalID; }, {"califa_gamma"})
+                   .Define("califa_gamma_mult", [](const GammaClusters &g)
+                           { return (int)g.e.size(); }, {"califa_gamma"});
 
         return node.Filter([](double opa)
                            { return opa > -990.0; },
@@ -566,12 +701,14 @@ static std::vector<std::string> detectorColumns()
             "fib32X", "fib32Y", "ElossFib32",
             "fib33X", "fib33Y", "ElossFib33",
             "tofdX",
-            "out_startX", "out_startY", "out_startZ"};
+            "out_startX", "out_startY", "out_startZ",
+            "vertex_x", "vertex_y", "vertex_z", "vertex_dca"};
 }
 
 static std::vector<std::string> buildOutputColumns(bool hasNeutrons)
 {
         std::vector<std::string> cols = {
+            "in_AoQ", "in_Z",
             "AoQ_frag", "Z_frag_est", "A_frag", "M_frag",
             "beta_frag", "p_frag"};
 
@@ -581,6 +718,9 @@ static std::vector<std::string> buildOutputColumns(bool hasNeutrons)
         cols.insert(cols.end(), {"califa_opa",
                                  "califa_theta_L", "califa_phi_L",
                                  "califa_theta_R", "califa_phi_R",
+                                 "califa_gamma_E", "califa_gamma_theta",
+                                 "califa_gamma_phi", "califa_gamma_crystalID",
+                                 "califa_gamma_mult",
                                  "px_frag", "py_frag", "pz_frag",
                                  "beta_proj"});
 
@@ -673,8 +813,9 @@ void eventFilter(std::string setting = "",
                                        { return n.GetEntriesFast() > 0; },
                                        {"NeulandHits"});
 
-        // ── FRS incoming (graphical cut) + fragment PID ─────────────────────
-        auto df_frs = defineFrsIncoming(df_cut);
+        // ── FRS columns (before PID filter) + incoming PID + fragment PID ──────
+        auto df_frs_cols = defineFrsColumns(df_cut);
+        auto df_frs = applyFrsIncomingFilter(df_frs_cols, cfg);
         auto df_frag = defineFragmentPID(df_frs);
 
         // ═════════════════  UNREACTED 25F PATH  ══════════════════════════════
@@ -769,12 +910,57 @@ void eventFilter(std::string setting = "",
                                   { return F.Pz(); }, {"P4_frag"});
 
         df_out = defineOutgoingStartPos(df_out);
+        df_out = defineReactionVertex(df_out);
 
-        // ── Snapshot ────────────────────────────────────────────────────────
+        // ── Snapshot (post-PID, includes in_AoQ / in_Z) ─────────────────────
         df_out.Snapshot("FilterDataTree", outFile,
                         buildOutputColumns(cfg.hasNeutrons));
 
-        std::cout << "\n[OK] TTree saved in: " << outFile << "\n";
+        std::cout << "\n[OK] FilterDataTree saved in: " << outFile << "\n";
+
+        // ── Pre-PID diagnostic tree + 2D PID plots ──────────────────────────────
+        // Both branch directly off the raw df — NO multiplicity, CALIFA, NeuLAND,
+        // or IncomingTrack conditions.  Only the bare minimum to safely read the
+        // relevant branch is applied.
+        //
+        // Incoming: only FrsData must be non-empty.
+        auto df_raw_in = defineFrsColumns(
+            df.Filter([](TClonesArray &f)
+                      { return f.GetEntriesFast() > 0; }, {"FrsData"}));
+
+        // Fragment: also requires FragmentMDFTrack so AoQ_frag / Z_frag_est can be read.
+        auto df_raw_frag = defineFragmentPID(defineFrsColumns(
+            df.Filter([](TClonesArray &f)
+                      { return f.GetEntriesFast() > 0; }, {"FrsData"})
+              .Filter([](TClonesArray &m)
+                      { return m.GetEntriesFast() > 0; }, {"FragmentMDFTrack"})));
+
+        // Register as lazy actions — fused into one event loop with PIDDiagTree below.
+        auto h_in_prePID = df_raw_in.Histo2D(
+            {"h_in_prePID", "Incoming beam PID (no cuts);AoQ;Z",
+             300, 2.5, 3.1, 300, 6.0, 13.0},
+            "in_AoQ", "in_Z");
+        auto h_frag_prePID = df_raw_frag.Histo2D(
+            {"h_frag_prePID", "Fragment PID (no cuts);AoQ;Z",
+             300, 2.3, 3.3, 300, 4.0, 12.0},
+            "AoQ_frag", "Z_frag_est");
+
+        ROOT::RDF::RSnapshotOptions diagOpts;
+        diagOpts.fMode = "UPDATE";
+        df_raw_frag.Snapshot("PIDDiagTree", outFile,
+                             {"in_AoQ", "in_Z", "AoQ_frag", "Z_frag_est"},
+                             diagOpts);
+
+        std::cout << "[OK] PIDDiagTree (no cuts) saved in: " << outFile << "\n";
+
+        // Write 2D pre-selection PID histograms (already computed in the pass above).
+        {
+                TFile ftmp(outFile.c_str(), "UPDATE");
+                h_in_prePID->Write();
+                h_frag_prePID->Write();
+                std::cout << "[OK] Pre-selection PID histograms saved in: " << outFile << "\n";
+        }
+
         if (fout)
                 fout->Close();
 }

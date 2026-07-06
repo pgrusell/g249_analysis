@@ -17,10 +17,25 @@ void runDataAnalysis(TString mode = "ana23")
         da->getData();
     }
 
+    if (mode == "ana22O")
+    {
+        auto *da = new DataAnalysis("/home/e12exp/ssd/PhD_analysis/g249_analysis/results/final/data_22O.root", "22O_analyzed.root", true);
+        da->setOffsetsFromTxt("22O.txt");
+        da->getData();
+    }
+
     if (mode == "betaMatching")
     {
         auto *da = new DataAnalysis("/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/data_23O_test.root", "23O_analyzed_test.root", true);
         da->setOffsetsFromTxt("23O1n.txt");
         da->matchBeta();
     }
+
+        if (mode == "betaMatching22O")
+    {
+        auto *da = new DataAnalysis("/home/e12exp/ssd/PhD_analysis/g249_analysis/results/final/data_22O.root", "22O_analyzed.root", true);
+        da->setOffsetsFromTxt("22O.txt");
+        da->matchBeta();
+    }
+
 }
