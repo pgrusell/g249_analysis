@@ -90,7 +90,7 @@ void ana_sim_neuland_eff(const Float_t nev = -1)
     const double UNIT = 931.4940954;
 
     int Z_frag = 8;
-    int A_frag = 22;
+    int A_frag = 23;
     Int_t pdgfrag = 10000 * (Z_frag + 100000) + A_frag * 10;
     float mfrag = Nuke_Mass_Tab[22][8];
     float m_neut = 939.565379;
