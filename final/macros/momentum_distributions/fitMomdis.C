@@ -223,6 +223,7 @@ std::vector<double> make_fit(RooDataHist *data,
     {
         std::string name = "val" + std::to_string(i);
         const double init = 1.0 / (nTerms + 1 - i);
+
         auto *v = new RooRealVar(name.c_str(), name.c_str(), init, 0., 1.);
         coefVars.push_back(v);
         coeffs.add(*v);
