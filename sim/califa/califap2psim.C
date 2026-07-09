@@ -81,7 +81,7 @@ void califap2psim(Int_t kIter = 1)
     run->AddModule(calsim);
 
     // -----   Create PrimaryGenerator   --------------------------------------
-    TString fEventFile = "/nucl_lustre/g249/sim/p_F25_630.root";
+    TString fEventFile = "/nucl_lustre/pablogrusell/g249/g249_analysis/final/macros/erel/gen/p_F25_630_v1_23O.root";
     R3BINCLRootGenerator *gen =
         new R3BINCLRootGenerator((fEventFile).Data());
     gen->SetOnlyP2pSpallation(true);
