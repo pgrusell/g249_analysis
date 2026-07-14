@@ -54,8 +54,10 @@
 #include "TH2D.h"
 #include "TAxis.h"
 #include "TCanvas.h"
+#include "TPad.h"
 #include "TLegend.h"
 #include "TLine.h"
+#include "TLatex.h"
 #include "TStyle.h"
 #include "TMath.h"
 #include "TString.h"
@@ -75,16 +77,26 @@ static Int_t gNRes = 3; // number of BW resonances
 
 // Orbital angular momentum of the emitted neutron, per resonance
 // (enters the energy-dependent width). 24O* -> 23O(1/2+) + n:
-// d3/2 hole states decay with l=2.
-static Int_t gLorb[kMaxRes] = {2, 2, 2, 2, 2, 2};
+//
+// MODELO DE 3 RESONANCIAS. Asignacion nominal: pico 1 (4.8 MeV) l=2,
+// pico 2 (7.4 MeV) l=2, pico 3 (10.4 MeV) l=1. El pico 2 contiene un
+// doblete no resuelto (l=1 y l=2): el fit se repite con gLorb[1]=1 y la
+// diferencia se reporta como incertidumbre sistematica (ver argumento
+// lPeak2 de fitErel()).
 
-// Initial guesses, Erel [MeV]  (Eexc ~ 4.9, 7.3, 10.4 => Erel ~ .7, 3.1, 6.2)
-static Double_t gInitE[kMaxRes] = {0.70, 3.10, 6.20, 0., 0., 0.};
-static Double_t gInitG[kMaxRes] = {0.15, 1.00, 2.00, 0., 0., 0.};
+static Int_t gLorb[kMaxRes] = {2, 1, 1, 0, 0, 0};
 
-// Parameter limits (Erel [MeV])
-static Double_t gElim[2] = {0.02, 9.5};
-static Double_t gGlim[2] = {0.01, 6.0};
+static Double_t gInitE[kMaxRes] = {0.60, 3.20, 6.20, 0., 0., 0.};
+static Double_t gInitG[kMaxRes] = {0.05, 1.20, 1.40, 0., 0., 0.};
+
+static Double_t gElo[kMaxRes] = {0.30, 2.50, 5.00, 0., 0., 0.};
+static Double_t gEhi[kMaxRes] = {0.90, 3.90, 7.50, 0., 0., 0.};
+static Double_t gGlim[2] = {0.01, 3.0};
+
+// Per-resonance parameter fixing, to freeze a value (e.g. to a literature
+// number) without touching the fit code below.
+static Bool_t gFixGamma[kMaxRes] = {kFALSE, kFALSE, kFALSE, kFALSE, kFALSE, kFALSE};
+static Bool_t gFixE[kMaxRes] = {kFALSE, kFALSE, kFALSE, kFALSE, kFALSE, kFALSE};
 
 static Bool_t gEnergyDepWidth = kTRUE;
 
@@ -95,7 +107,7 @@ static Int_t gNSub = 10;
 // Globals shared with the likelihood function
 // ----------------------------------------------------------------------------
 static Double_t gSn = 4.2;
-static Double_t gFitLo = 4.3, gFitHi = 13.8;
+static Double_t gFitLo = 4.3, gFitHi = 20.;
 static TH1D *gData = nullptr;  // data, Eexc binning
 static TH1D *gBgExc = nullptr; // bg template, Eexc binning, unit integral in fit range
 static TH2D *gRespN = nullptr; // normalized response (X=true Erel, Y=rec Erel)
@@ -236,20 +248,28 @@ void fitErel(const char *dataFile =
              const char *bgFile =
                  "/nucl_lustre/pablogrusell/g249/g249_analysis/final/macros/erel/ana_results/bg_analysis.root",
              const char *simFile =
-                 "/nucl_lustre/pablogrusell/g249/g249_analysis/final/macros/erel/ana_results/sim_analysis.root",
+                 "/nucl_lustre/pablogrusell/g249/g249_analysis/final/macros/erel/ana_results/full_analysis.root",
              const char *cut = "califa_opa > 1.25 && califa_opa < 1.65",
              Double_t Sn = 4.2,
              Double_t fitLo = 4.3,
-             Double_t fitHi = 13.8,
+             Double_t fitHi = 20,
              Bool_t useEfficiency = kTRUE,
              Bool_t smoothBg = kTRUE,
-             const char *outFile = "fitExc_results.root")
+             const char *outFile = "fitExc_results.root",
+             Int_t lPeak2 = -1)
 {
     gSn = Sn;
     gFitLo = fitLo;
     gFitHi = fitHi;
 
-    if (gFitHi > gSn + 10.)
+    if (lPeak2 >= 0)
+    {
+        gLorb[1] = lPeak2;
+        std::cout << "[fitExc] lPeak2 override: gLorb[1] = " << gLorb[1]
+                  << " (systematic-l variant)\n";
+    }
+
+    if (gFitHi > gSn + 20.)
     {
         std::cout << "[fitExc] WARNING: fitHi=" << gFitHi
                   << " MeV exceeds the response-matrix coverage (Eexc < Sn+10 = "
@@ -403,6 +423,7 @@ void fitErel(const char *dataFile =
     }
     min->SetMaxFunctionCalls(200000);
     min->SetTolerance(0.1);
+    min->SetStrategy(2);
     min->SetPrintLevel(1);
     min->SetErrorDef(0.5); // NLL
 
@@ -414,10 +435,16 @@ void fitErel(const char *dataFile =
         min->SetLimitedVariable(3 * k, Form("A%d", k + 1),
                                 0.25 * nDataFit, 0.01 * nDataFit,
                                 0., 20. * nDataFit);
-        min->SetLimitedVariable(3 * k + 1, Form("Erel%d", k + 1),
-                                gInitE[k], 0.02, gElim[0], gElim[1]);
-        min->SetLimitedVariable(3 * k + 2, Form("Gamma%d", k + 1),
-                                gInitG[k], 0.02, gGlim[0], gGlim[1]);
+        if (gFixE[k])
+            min->SetFixedVariable(3 * k + 1, Form("Erel%d", k + 1), gInitE[k]);
+        else
+            min->SetLimitedVariable(3 * k + 1, Form("Erel%d", k + 1),
+                                    gInitE[k], 0.02, gElo[k], gEhi[k]);
+        if (gFixGamma[k])
+            min->SetFixedVariable(3 * k + 2, Form("Gamma%d", k + 1), gInitG[k]);
+        else
+            min->SetLimitedVariable(3 * k + 2, Form("Gamma%d", k + 1),
+                                    gInitG[k], 0.02, gGlim[0], gGlim[1]);
     }
     min->SetLimitedVariable(3 * gNRes, "Abg",
                             0.3 * nDataFit, 0.01 * nDataFit,
@@ -462,15 +489,36 @@ void fitErel(const char *dataFile =
     std::cout << (ok ? "  Minimization converged.\n"
                      : "  WARNING: minimization did NOT converge!\n");
     std::cout << "  chi2/ndf (Pearson) = " << chi2 << " / " << ndf << " = "
-              << (ndf > 0 ? chi2 / ndf : 0.) << "\n\n";
+              << (ndf > 0 ? chi2 / ndf : 0.) << "\n";
+    std::cout << "  NLL at minimum      = " << std::fixed
+              << std::setprecision(6) << min->MinValue() << "\n";
+    if (gNRes >= 2)
+        std::cout << "  l assignment used for peak 2: l = " << gLorb[1]
+                  << (lPeak2 >= 0 ? " (override via lPeak2 argument)\n"
+                                  : " (nominal)\n");
+    std::cout << "\n";
     std::cout << std::fixed << std::setprecision(3);
     for (Int_t k = 0; k < gNRes; ++k)
     {
         std::cout << "  Resonance " << k + 1 << " (l=" << gLorb[k] << "):\n"
-                  << "     Erel   = " << p[3 * k + 1] << " +- " << e[3 * k + 1] << " MeV\n"
-                  << "     Eexc   = " << p[3 * k + 1] + gSn << " +- " << e[3 * k + 1]
-                  << " MeV   (Sn = " << gSn << ")\n"
-                  << "     Gamma0 = " << p[3 * k + 2] << " +- " << e[3 * k + 2] << " MeV\n"
+                  << "     Erel   = " << p[3 * k + 1] << " +- ";
+        if (gFixE[k])
+            std::cout << "(fixed)";
+        else
+            std::cout << e[3 * k + 1];
+        std::cout << " MeV\n"
+                  << "     Eexc   = " << p[3 * k + 1] + gSn << " +- ";
+        if (gFixE[k])
+            std::cout << "(fixed)";
+        else
+            std::cout << e[3 * k + 1];
+        std::cout << " MeV   (Sn = " << gSn << ")\n"
+                  << "     Gamma0 = " << p[3 * k + 2] << " +- ";
+        if (gFixGamma[k])
+            std::cout << "(fixed)";
+        else
+            std::cout << e[3 * k + 2];
+        std::cout << " MeV\n"
                   << "     Yield  = " << p[3 * k] << " +- " << e[3 * k]
                   << (useEfficiency ? "  (efficiency-corrected decays, Erel 0-10 MeV)\n"
                                     : "  (NOT efficiency corrected)\n");
@@ -480,15 +528,30 @@ void fitErel(const char *dataFile =
     std::cout << "===========================================================\n\n";
 
     // ------------------------------------------------------------------------
-    // 7) Draw
+    // 7) Draw -- two pads: main fit (top) + pull panel (bottom)
     // ------------------------------------------------------------------------
     gStyle->SetOptStat(0);
-    auto *c = new TCanvas("cFitExc", "24O* excitation energy fit", 950, 700);
-    c->SetLeftMargin(0.12);
+    auto *c = new TCanvas("cFitExc", "24O* excitation energy fit", 950, 800);
+
+    auto *padTop = new TPad("padTop", "padTop", 0., 0.30, 1., 1.00);
+    padTop->SetLeftMargin(0.12);
+    padTop->SetBottomMargin(0.02);
+    padTop->SetTopMargin(0.08);
+    padTop->Draw();
+
+    auto *padBot = new TPad("padBot", "padBot", 0., 0.00, 1., 0.30);
+    padBot->SetLeftMargin(0.12);
+    padBot->SetTopMargin(0.02);
+    padBot->SetBottomMargin(0.35);
+    padBot->Draw();
+
+    padTop->cd();
 
     gData->SetMarkerStyle(20);
     gData->SetMarkerSize(0.8);
     gData->SetLineColor(kBlack);
+    gData->GetXaxis()->SetLabelSize(0.);
+    gData->GetXaxis()->SetTitleSize(0.);
     gData->Draw("E1");
 
     // background component
@@ -544,6 +607,73 @@ void fitErel(const char *dataFile =
         l->SetLineColor(kBlack);
         l->Draw();
     }
+
+    auto *txtChi2 = new TLatex();
+    txtChi2->SetNDC();
+    txtChi2->SetTextSize(0.035);
+    txtChi2->DrawLatex(0.15, 0.93,
+                       Form("#chi^{2}/ndf = %.1f / %d", chi2, ndf));
+
+    // ------------------------------------------------------------------------
+    // 7b) Pull panel: (data - model)/sqrt(model), only within [gFitLo,gFitHi]
+    // ------------------------------------------------------------------------
+    auto *hPulls = static_cast<TH1D *>(gData->Clone("hPulls"));
+    hPulls->SetDirectory(nullptr);
+    hPulls->Reset();
+    hPulls->SetTitle(";E_{exc} [MeV];pull");
+
+    Double_t maxAbsPull = 0.;
+    for (Int_t b = b1; b <= b2; ++b)
+    {
+        const Double_t m = hModel->GetBinContent(b);
+        if (m > 0.)
+        {
+            const Double_t pull = (gData->GetBinContent(b) - m) / TMath::Sqrt(m);
+            hPulls->SetBinContent(b, pull);
+            hPulls->SetBinError(b, 0.);
+            if (TMath::Abs(pull) > maxAbsPull)
+                maxAbsPull = TMath::Abs(pull);
+        }
+    }
+    Double_t pullRange = maxAbsPull * 1.2;
+    if (pullRange < 3.)
+        pullRange = 3.;
+
+    padBot->cd();
+    hPulls->SetMarkerStyle(20);
+    hPulls->SetMarkerSize(0.7);
+    hPulls->SetMarkerColor(kBlack);
+    hPulls->SetLineColor(kBlack);
+    hPulls->GetYaxis()->SetRangeUser(-pullRange, pullRange);
+    hPulls->GetXaxis()->SetTitle("E_{exc} [MeV]");
+    hPulls->GetYaxis()->SetTitle("pull");
+    hPulls->GetXaxis()->SetLabelSize(0.10);
+    hPulls->GetXaxis()->SetTitleSize(0.10);
+    hPulls->GetXaxis()->SetTitleOffset(1.3);
+    hPulls->GetYaxis()->SetLabelSize(0.10);
+    hPulls->GetYaxis()->SetTitleSize(0.10);
+    hPulls->GetYaxis()->SetTitleOffset(0.5);
+    hPulls->GetYaxis()->SetNdivisions(505);
+    hPulls->Draw("E1");
+
+    auto *lZero = new TLine(0., 0., 20., 0.);
+    lZero->SetLineColor(kGray + 1);
+    lZero->SetLineStyle(2);
+    lZero->Draw();
+
+    auto *lPlus2 = new TLine(0., 2., 20., 2.);
+    lPlus2->SetLineColor(kGray);
+    lPlus2->SetLineStyle(3);
+    lPlus2->Draw();
+
+    auto *lMinus2 = new TLine(0., -2., 20., -2.);
+    lMinus2->SetLineColor(kGray);
+    lMinus2->SetLineStyle(3);
+    lMinus2->Draw();
+
+    hPulls->Draw("E1 SAME");
+
+    c->cd();
     c->Update();
 
     // ------------------------------------------------------------------------
@@ -556,6 +686,7 @@ void fitErel(const char *dataFile =
     for (size_t k = 0; k < comps.size(); ++k)
         comps[k]->Write(Form("hResonance%zu_plusBg", k + 1));
     gRespN->Write("hRespNorm");
+    hPulls->Write("hPulls");
     c->Write("cFitExc");
     fout->Close();
     std::cout << "[fitExc] output written to " << outFile << std::endl;
