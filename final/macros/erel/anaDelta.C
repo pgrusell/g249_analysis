@@ -306,9 +306,9 @@ FindFirstNeutron(TTreeReaderArray<Double32_t> &x,
 // ----------------------------------------------------------------------------
 // Main entry point
 // ----------------------------------------------------------------------------
-void anaDelta(const char *simFile = "sim_results/bg.simu.root",
+void anaDelta(const char *simFile = "sim_results/full.simu.root, sim_results/full.simu_1.root, sim_results/full.simu_2.root, sim_results/full.simu_3.root, sim_results/full.simu_4.root, sim_results/full.simu_5.root",
               const char *mdfFile = "PoQ_9vars_150terms.txt",
-              const char *outFile = "ana_results/bg_analysis.root",
+              const char *outFile = "ana_results/full2_analysis.root",
               Long64_t maxEvents = 100000000,
               UInt_t randomSeed = 0,
               Bool_t useExperimentGeometry = kFALSE,
@@ -459,18 +459,18 @@ void anaDelta(const char *simFile = "sim_results/bg.simu.root",
 
     // ----- Erel / response (same binning as DataAnalysis::fErel) ---------
     auto hErel = new TH1D("hErel", "Reconstructed E_{rel};E_{rel} [MeV];counts",
-                          100, -5., 10.);
+                          100, -1, 20.);
     auto hErelTrue = new TH1D("hErelTrue", "MC-truth E_{rel};E_{rel} [MeV];counts",
-                              100, -5., 10.);
+                              100, -1., 20.);
     auto hErelFragTrue = new TH1D("hErelFragTrue",
                                   "E_{rel} with true fragment momentum + reconstructed neutron;E_{rel} [MeV];counts",
-                                  100, -5., 10.);
+                                  100, -1., 20.);
     auto hErelRes = new TH1D("hErelRes",
                              "E_{rel} response;E_{rel}^{rec}-E_{rel}^{tru} [MeV];counts",
                              200, -5., 5.);
     auto hErelRecVsTrue = new TH2D("hErelRecVsTrue",
                                    "Response matrix;E_{rel}^{tru} [MeV];E_{rel}^{rec} [MeV]",
-                                   100, 0., 10., 100, -5., 10.);
+                                   100, 0., 20., 100, -1., 20.);
     auto hErelFragTrueRes = new TH1D("hErelFragTrueRes",
                                      "E_{rel} response (true p_{frag} + reco neutron);"
                                      "E_{rel}^{fragTrue}-E_{rel}^{tru} [MeV];counts",
@@ -478,7 +478,7 @@ void anaDelta(const char *simFile = "sim_results/bg.simu.root",
     auto hErelFragTrueRecVsTrue = new TH2D("hErelFragTrueRecVsTrue",
                                            "Response matrix (true p_{frag} + reco neutron);"
                                            "E_{rel}^{tru} [MeV];E_{rel}^{fragTrue} [MeV]",
-                                           100, 0., 10., 100, -5., 10.);
+                                           100, 0., 10., 100, -1., 20.);
     auto hDeltaBeta = new TH1D("hDeltaBeta", "#Delta#beta = #beta_{frag}-#beta_{n};#Delta#beta;counts",
                                100, -0.3, 0.3);
 
