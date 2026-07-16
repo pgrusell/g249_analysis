@@ -1,250 +1,60 @@
-#include <TH1.h>
-#include <TRotation.h>
-#include <TVector3.h>
+// eventMixingIterative.C
+//   Fondo no resonante por EVENT-MIXING ITERATIVO CON PESOS (metodo de A. Revel, tesis).
+//   Corrige la "correlacion residual" <C>(p) que sobrevive al mixing estandar cuando
+//   la correlacion es fuerte (ec. 2.10-2.13 de la tesis).
+//
+//   Idea:
+//     - Se construye el fondo mezclado sobre TODOS los pares i!=j (O(N^2)).
+//     - C(x) = datos / fondo  ->  peso por particula w_i = 1/<C>(p_i)
+//     - Se rehace el fondo pesando cada par virtual por w_i*w_j, y se itera.
+//
+//   Uso:  root -l 'eventMixingIterative.C+("/ruta/data_23O.root")'
+#include <TFile.h>
+#include <TTree.h>
+#include <TH1F.h>
+#include <TCanvas.h>
+#include <TLegend.h>
+#include <vector>
+#include <cmath>
+#include <iostream>
 
-namespace
+void eventMixing(const char *inName =
+                     "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/data_23O.root",
+                 const char *outName = "23O_mixing_iterative.root",
+                 int nIter = 25,                                    // iteraciones del algoritmo (Fig 2.3 usa ~10)
+                 int nInnerIter = 3,                                // sub-iteraciones para <C>(p_i) (ec. 2.13)
+                 int nbins = 150, double xlo = -1, double xhi = 30) // MeV, como fErel
 {
-    // Masa del neutron en GeV (mismo valor que DataAnalysis::m_neut)
-    constexpr double m_neut = 0.939565;
+    // --- constantes y offsets (23O1n.txt) ------------------------------------
+    const double m_neut = 0.939565; // GeV
 
-    struct Offsets
-    {
-        double fragP[2] = {0., 0.}; // offsets angulares px/pz, py/pz del fragmento
-        double neuP[2] = {0., 0.};  // offsets angulares px/pz, py/pz del neutron
-        double betaMatch = 0.;      // correccion aditiva de beta del fragmento
-        bool ok = false;
-    };
+    const double fFragOffX = -0.0026286137;
+    const double fFragOffY = -0.016158624;
+    const double fNeuOffX = -0.0012187827;
+    const double fNeuOffY = -0.018529642;
+    const double fBetaMatch = -0.00140415;
 
-    // Cinematica minima que necesitamos para el Erel, cacheada por evento.
-    // Se guardan tanto las componentes de laboratorio (px,py,pz) como su version
-    // rotada evento-a-evento al marco del proyectil de ESE evento (pxR,pyR,pzR),
-    // ver rotateToBeamFrame() y la nota fisica junto a computeCosAngle().
-    struct Frag
-    {
-        double M, beta;
-        double px, py, pz;
-        double pxR, pyR, pzR;
-    };
-    struct Neu
-    {
-        double beta;
-        double px, py, pz;
-        double pxR, pyR, pzR;
-    };
+    const double fxOff = -fFragOffX, fyOff = -fFragOffY;
+    const double dxOff = -fNeuOffX, dyOff = -fNeuOffY;
 
-    // Misma convencion de lectura que DataAnalysis::setOffsetsFromTxt
-    Offsets loadOffsets(const std::string &offFile)
-    {
-        Offsets o;
-
-        const char *repo = getenv("repopath");
-        if (!repo)
-        {
-            std::cerr << "[eventMixing] ERROR: la variable de entorno 'repopath' no esta definida\n";
-            return o;
-        }
-
-        const std::string txtPath = std::string(repo) + "/final/settings/" + offFile;
-
-        std::ifstream in(txtPath);
-        if (!in)
-        {
-            std::cerr << "[eventMixing] ERROR: no se puede abrir el fichero de offsets " << txtPath << "\n";
-            return o;
-        }
-
-        std::vector<double> v;
-        std::string line;
-        while (std::getline(in, line))
-            v.push_back(std::atof(line.c_str()));
-
-        if (v.size() < 5)
-        {
-            std::cerr << "[eventMixing] ERROR: el fichero de offsets tiene < 5 lineas\n";
-            return o;
-        }
-
-        o.fragP[0] = v[0];
-        o.fragP[1] = v[1];
-        o.neuP[0] = v[2];
-        o.neuP[1] = v[3];
-        o.betaMatch = v[4];
-        o.ok = true;
-        return o;
-    }
-
-    // Rota un vector de momento al marco en el que la direccion del haz (por evento)
-    // define el eje Z, con la misma convencion que DataAnalysis::getData(): phi/theta
-    // de la direccion del haz, R.RotateZ(-phi) seguido de R.RotateY(-theta).
-    TVector3 rotateToBeamFrame(const TVector3 &v, const TVector3 &beamDir)
-    {
-        const double phi = beamDir.Phi();
-        const double theta = beamDir.Theta();
-
-        TRotation R;
-        R.RotateZ(-phi);
-        R.RotateY(-theta);
-
-        TVector3 out(v);
-        out.Transform(R);
-        return out;
-    }
-
-    // Coseno del angulo de apertura neutron-fragmento (misma formula que
-    // DataAnalysis::getData(), proyectando las pendientes transversales px/pz, py/pz).
-    //
-    // Nota fisica sobre 'rotateToProjFrame':
-    // En un evento real, el neutron y el fragmento comparten la direccion del haz
-    // incidente DE ESE EVENTO (rama px_in/py_in/pz_in), que fluctua evento a evento
-    // por la optica/reconstruccion del haz. Esa inclinacion comun se cancela en el
-    // angulo relativo neutron-fragmento cuando ambos vienen del MISMO evento. Si en
-    // vez de eso usamos las pendientes de LABORATORIO (con offsets constantes,
-    // promediados sobre todo el run) y mezclamos eventos (event mixing), el neutron
-    // trae la inclinacion de haz del evento A y el fragmento la del evento B: esa
-    // diferencia YA NO se cancela y se suma como un angulo de apertura espurio,
-    // inflando el Erel del fondo mezclado (maximo desplazado a 5-6 MeV con cola
-    // hasta 20 MeV en vez de picar cerca del umbral).
-    //
-    // Rotando cada evento a su propio marco del proyectil ANTES de cachear/mezclar
-    // (misma maquinaria que la rotacion a projectile-RF de DataAnalysis::getData():
-    // TRotation con RotateZ(-phi)/RotateY(-theta) segun la direccion del haz de ESE
-    // evento) se elimina esa componente espuria: tanto el neutron como el fragmento
-    // quedan expresados en un marco donde el haz de SU evento ya es el eje Z, y el
-    // angulo relativo que sobrevive al mezclar es el fisicamente comparable.
-    //
-    // 'applyLabOffsets' controla si ademas se siguen restando los offsets angulares
-    // constantes (fNeutronPOffsets/fFragmentPOffsets). Esos offsets se calibraron
-    // originalmente para corregir un desalineamiento medio en el marco de LABORATORIO;
-    // en el marco rotado podrian estar corrigiendo (parcial o totalmente) lo mismo que
-    // ya corrige la rotacion evento-a-evento, y aplicarlos ahi podria sobre-corregir.
-    // Se deja como opcion para comparar ambos casos en vez de asumir cual es correcto.
-    double computeCosAngle(const Frag &fr, const Neu &nu, const Offsets &off,
-                            bool rotateToProjFrame, bool applyLabOffsets)
-    {
-        double npx, npy, npz;
-        double fpx, fpy, fpz;
-
-        if (rotateToProjFrame)
-        {
-            npx = nu.pxR;
-            npy = nu.pyR;
-            npz = nu.pzR;
-            fpx = fr.pxR;
-            fpy = fr.pyR;
-            fpz = fr.pzR;
-        }
-        else
-        {
-            npx = nu.px;
-            npy = nu.py;
-            npz = nu.pz;
-            fpx = fr.px;
-            fpy = fr.py;
-            fpz = fr.pz;
-        }
-
-        const double offNx = applyLabOffsets ? off.neuP[0] : 0.0;
-        const double offNy = applyLabOffsets ? off.neuP[1] : 0.0;
-        const double offFx = applyLabOffsets ? off.fragP[0] : 0.0;
-        const double offFy = applyLabOffsets ? off.fragP[1] : 0.0;
-
-        const double dx_neu = npx / npz - offNx;
-        const double dy_neu = npy / npz - offNy;
-
-        const double fx_frag = fpx / fpz - offFx;
-        const double fy_frag = fpy / fpz - offFy;
-
-        return (dx_neu * fx_frag + dy_neu * fy_frag + 1.0) /
-               (std::sqrt(dx_neu * dx_neu + dy_neu * dy_neu + 1.0) *
-                std::sqrt(fx_frag * fx_frag + fy_frag * fy_frag + 1.0));
-    }
-
-    // Misma formula de masa invariante que en DataAnalysis::getData().
-    // El fragmento (fr) y el neutron (nu) pueden provenir de eventos DISTINTOS
-    // (event mixing) o del MISMO evento (Erel correlacionado).
-    double computeErel(const Frag &fr, const Neu &nu, const Offsets &off,
-                        bool rotateToProjFrame, bool applyLabOffsets)
-    {
-        // Offset de beta aplicado al fragmento (igual que beta_frag += fBetaMatchValue)
-        const double beta_frag = fr.beta + off.betaMatch;
-
-        const double cos_ang = computeCosAngle(fr, nu, off, rotateToProjFrame, applyLabOffsets);
-
-        const double gamma_neu = 1.0 / std::sqrt(1.0 - nu.beta * nu.beta);
-        const double gamma_frag = 1.0 / std::sqrt(1.0 - beta_frag * beta_frag);
-
-        const double m_f = fr.M;
-
-        const double Erel =
-            std::sqrt(m_f * m_f + m_neut * m_neut +
-                      2.0 * gamma_neu * gamma_frag * m_f * m_neut *
-                          (1.0 - nu.beta * beta_frag * cos_ang)) -
-            m_f - m_neut;
-
-        return Erel;
-    }
-
-    // Angulo de apertura en grados, a partir del cos_ang usado en el Erel (con clamp
-    // por seguridad numerica antes de acos).
-    double openingAngleDeg(const Frag &fr, const Neu &nu, const Offsets &off,
-                           bool rotateToProjFrame, bool applyLabOffsets)
-    {
-        double c = computeCosAngle(fr, nu, off, rotateToProjFrame, applyLabOffsets);
-        if (c > 1.0)
-            c = 1.0;
-        if (c < -1.0)
-            c = -1.0;
-        return TMath::ACos(c) * TMath::RadToDeg();
-    }
-}
-
-void eventMixing(
-    TString dataFilePath = "/nucl_lustre/pablogrusell/g249/g249_analysis/results/dataFiles/data_23O.root",
-    TString offFile = "23O1n.txt",
-    TString outFileName = "23O_background_mixed.root",
-    int nCounts = 6000,
-    unsigned int seed = -1,
-    int nbins = 100, double elo = 0, double ehi = 20.,
-    bool rotateToProjFrame = true, // rotar cada evento a su propio marco del haz antes de cachear/mezclar
-    bool applyLabOffsets = true)   // aplicar ademas los offsets angulares constantes (ver nota en computeCosAngle)
-{
-    // ---------------------------------------------------------------------
-    // 1) Offsets (momento + beta), misma convencion que la clase
-    // ---------------------------------------------------------------------
-    Offsets off = loadOffsets(offFile.Data());
-    if (!off.ok)
-        return;
-
-    // ---------------------------------------------------------------------
-    // 2) Abrir fichero y TTree
-    // ---------------------------------------------------------------------
-    TFile *f = TFile::Open(dataFilePath, "READ");
+    // --- leer arbol ----------------------------------------------------------
+    TFile *f = TFile::Open(inName, "READ");
     if (!f || f->IsZombie())
     {
-        std::cerr << "[eventMixing] ERROR: no se pudo abrir " << dataFilePath << "\n";
+        std::cerr << "ERROR: no se pudo abrir " << inName << std::endl;
         return;
     }
-
     TTree *t = dynamic_cast<TTree *>(f->Get("FilterDataTree"));
     if (!t)
     {
-        std::cerr << "[eventMixing] ERROR: no se encontro el TTree \"FilterDataTree\"\n";
+        std::cerr << "ERROR: no se encontro FilterDataTree.\n";
         f->Close();
         return;
     }
 
-    Double_t M_frag, beta_frag, px_frag, py_frag, pz_frag;
-    Double_t beta_neu, px_neu, py_neu, pz_neu;
-    Double_t califa_opa;
-    Double_t px_in, py_in, pz_in; // direccion del haz incidente, por evento
-
-    // Solo activamos las ramas que usamos (mas rapido)
-    t->SetBranchStatus("*", 0);
-    const char *used[] = {"M_frag", "beta_frag", "px_frag", "py_frag", "pz_frag",
-                          "beta_neu", "px_neu", "py_neu", "pz_neu", "califa_opa",
-                          "px_in", "py_in", "pz_in"};
-    for (auto br : used)
-        t->SetBranchStatus(br, 1);
+    Double_t M_frag, beta_frag, beta_neu;
+    Double_t px_frag, py_frag, pz_frag;
+    Double_t px_neu, py_neu, pz_neu;
 
     t->SetBranchAddress("M_frag", &M_frag);
     t->SetBranchAddress("beta_frag", &beta_frag);
@@ -255,218 +65,291 @@ void eventMixing(
     t->SetBranchAddress("px_neu", &px_neu);
     t->SetBranchAddress("py_neu", &py_neu);
     t->SetBranchAddress("pz_neu", &pz_neu);
-    t->SetBranchAddress("califa_opa", &califa_opa);
-    t->SetBranchAddress("px_in", &px_in);
-    t->SetBranchAddress("py_in", &py_in);
-    t->SetBranchAddress("pz_in", &pz_in);
 
-    // ---------------------------------------------------------------------
-    // 3) Cachear la cinematica evento a evento (frag + neu del MISMO evento).
-    //    Guardamos ambos alineados por indice para poder exigir luego iF != iN.
-    //    Si rotateToProjFrame, tambien cacheamos las componentes rotadas al
-    //    marco del haz de ESE evento (ver rotateToBeamFrame()).
-    // ---------------------------------------------------------------------
-    std::vector<Frag> frags;
-    std::vector<Neu> neus;
+    struct FragKin
+    {
+        double beta, M, fx, fy;
+    };
+    struct NeuKin
+    {
+        double beta, dx, dy;
+    };
+    std::vector<FragKin> frags;
+    std::vector<NeuKin> neus;
 
-    // Distribuciones de control de las variables de entrada
-    TH1F *hBetaFrag = new TH1F("hBetaFrag", "#beta del fragmento (QFS, cacheados);#beta_{frag};Cuentas", 100, 0., 1.);
-    TH1F *hBetaNeu = new TH1F("hBetaNeu", "#beta del neutron (QFS, cacheados);#beta_{neu};Cuentas", 100, 0., 1.);
-    TH1F *hMFrag = new TH1F("hMFrag", "Masa del fragmento (QFS, cacheados);M_{frag} [GeV];Cuentas", 100, 0., 30.);
-    hBetaFrag->SetCanExtend(TH1::kXaxis);
-    hBetaNeu->SetCanExtend(TH1::kXaxis);
-    hMFrag->SetCanExtend(TH1::kXaxis);
+    const Long64_t Nall = t->GetEntries();
+    frags.reserve(Nall);
+    neus.reserve(Nall);
 
-    const Long64_t nentries = t->GetEntries();
-    frags.reserve(nentries);
-    neus.reserve(nentries);
-
-    for (Long64_t i = 0; i < nentries; ++i)
+    for (Long64_t i = 0; i < Nall; ++i)
     {
         t->GetEntry(i);
-
-        // Filtro minimo de validez para evitar NaN/inf
-        const bool okFrag = (pz_frag != 0.) && (M_frag > 0.) &&
-                            (beta_frag > 0.) && (beta_frag < 1.);
-        const bool okNeu = (pz_neu != 0.) &&
-                           (beta_neu > 0.) && (beta_neu < 1.);
-        // Solo eventos QFS (quasi-free scattering), definidos por el angulo de apertura de CALIFA
-        const bool okOpa = (califa_opa > 1.25) && (califa_opa < 1.65);
-
-        if (!okFrag || !okNeu || !okOpa)
-            continue;
-
-        Frag fr;
-        fr.M = M_frag;
-        fr.beta = beta_frag;
-        fr.px = px_frag;
-        fr.py = py_frag;
-        fr.pz = pz_frag;
-        fr.pxR = fr.px;
-        fr.pyR = fr.py;
-        fr.pzR = fr.pz;
-
-        Neu nu;
-        nu.beta = beta_neu;
-        nu.px = px_neu;
-        nu.py = py_neu;
-        nu.pz = pz_neu;
-        nu.pxR = nu.px;
-        nu.pyR = nu.py;
-        nu.pzR = nu.pz;
-
-        if (rotateToProjFrame)
-        {
-            const TVector3 beamDir(px_in, py_in, pz_in);
-            if (beamDir.Mag2() <= 0.)
-                continue; // sin direccion de haz valida para este evento, no se puede rotar
-
-            const TVector3 vFrag = rotateToBeamFrame(TVector3(px_frag, py_frag, pz_frag), beamDir);
-            const TVector3 vNeu = rotateToBeamFrame(TVector3(px_neu, py_neu, pz_neu), beamDir);
-
-            fr.pxR = vFrag.X();
-            fr.pyR = vFrag.Y();
-            fr.pzR = vFrag.Z();
-            nu.pxR = vNeu.X();
-            nu.pyR = vNeu.Y();
-            nu.pzR = vNeu.Z();
-        }
-
-        frags.push_back(fr);
-        neus.push_back(nu);
-
-        hBetaFrag->Fill(beta_frag);
-        hBetaNeu->Fill(beta_neu);
-        hMFrag->Fill(M_frag);
+        FragKin fk;
+        fk.beta = beta_frag + fBetaMatch;
+        fk.M = M_frag;
+        fk.fx = px_frag / pz_frag + fxOff;
+        fk.fy = py_frag / pz_frag + fyOff;
+        NeuKin nk;
+        nk.beta = beta_neu;
+        nk.dx = px_neu / pz_neu + dxOff;
+        nk.dy = py_neu / pz_neu + dyOff;
+        frags.push_back(fk);
+        neus.push_back(nk);
     }
+    f->Close();
 
-    const size_t N = frags.size();
-    std::cout << "[eventMixing] Eventos validos cacheados: " << N << "\n";
+    const int N = (int)frags.size();
     if (N < 2)
     {
-        std::cerr << "[eventMixing] ERROR: no hay suficientes eventos para mezclar\n";
-        f->Close();
+        std::cerr << "ERROR: pocos eventos (" << N << ").\n";
         return;
     }
+    std::cout << "Eventos: " << N << "   (pares virtuales ~ " << (double)N * (N - 1) << ")\n";
 
-    // ---------------------------------------------------------------------
-    // 3b) Erel correcto: fragmento y neutron del MISMO evento (sin mixing).
-    //     Tambien llenamos el angulo de apertura para pares del MISMO evento,
-    //     como referencia para comparar con el de los pares MEZCLADOS.
-    // ---------------------------------------------------------------------
-    TH1F *hErel = new TH1F(
-        "hErel",
-        "E_{rel} correlacionado (mismo evento);E_{rel} [MeV];Cuentas",
-        nbins, elo, ehi);
-    hErel->SetLineColor(kBlue + 1);
-    hErel->SetLineWidth(2);
-
-    TH1F *hOpaSame = new TH1F(
-        "hOpaSame",
-        "Angulo de apertura neutron-fragmento;#theta_{n-frag} [deg];Cuentas",
-        100, 0., 5.);
-    hOpaSame->SetCanExtend(TH1::kXaxis);
-    hOpaSame->SetLineColor(kBlue + 1);
-    hOpaSame->SetLineWidth(2);
-
-    for (size_t i = 0; i < N; ++i)
+    // --- Erel(fragmento i, neutron j): misma formula que getData() -----------
+    auto erelOf = [&](int i, int j) -> double
     {
-        const double Erel = computeErel(frags[i], neus[i], off, rotateToProjFrame, applyLabOffsets);
-        if (!std::isfinite(Erel))
-            continue;
+        const FragKin &fk = frags[i];
+        const NeuKin &nk = neus[j];
+        double cos_ang =
+            (nk.dx * fk.fx + nk.dy * fk.fy + 1.0) /
+            (std::sqrt(nk.dx * nk.dx + nk.dy * nk.dy + 1.0) *
+             std::sqrt(fk.fx * fk.fx + fk.fy * fk.fy + 1.0));
+        double g_neu = 1.0 / std::sqrt(1.0 - nk.beta * nk.beta);
+        double g_frag = 1.0 / std::sqrt(1.0 - fk.beta * fk.beta);
+        double m_f = fk.M;
+        double Erel = std::sqrt(m_f * m_f + m_neut * m_neut +
+                                2.0 * g_neu * g_frag * m_f * m_neut *
+                                    (1.0 - nk.beta * fk.beta * cos_ang)) -
+                      m_f - m_neut;
+        return Erel * 1000.0; // MeV
+    };
 
-        hErel->Fill(Erel * 1000.0); // GeV -> MeV
-        hOpaSame->Fill(openingAngleDeg(frags[i], neus[i], off, rotateToProjFrame, applyLabOffsets));
+    // --- histograma de datos (mismo evento) ----------------------------------
+    TH1F *hReal = new TH1F("hReal", "Erel data;E_{rel} [MeV];counts", nbins, xlo, xhi);
+    hReal->Sumw2();
+    for (int i = 0; i < N; ++i)
+        hReal->Fill(erelOf(i, i));
+    const double sReal = hReal->Integral();
+
+    // --- utilidades de binning para C(x) -------------------------------------
+    const double bw = (xhi - xlo) / nbins;
+    auto binOf = [&](double x) -> int
+    {
+        int b = (int)((x - xlo) / bw);
+        if (b < 0 || b >= nbins)
+            return -1;
+        return b;
+    };
+
+    // Precalcular Erel_ij? -> N^2 doubles puede ser mucho (3090^2*8B ~ 76 MB, OK).
+    // Para N mas grandes, quitar el cache y recalcular en el bucle.
+    std::vector<float> erelCache((size_t)N * N);
+    for (int i = 0; i < N; ++i)
+        for (int j = 0; j < N; ++j)
+            erelCache[(size_t)i * N + j] = (float)erelOf(i, j);
+    auto ERij = [&](int i, int j) -> double
+    { return erelCache[(size_t)i * N + j]; };
+
+    // C(x): funcion de correlacion por bin. Inicializada a 1.
+    std::vector<double> C(nbins, 1.0);
+
+    // pesos por particula: wFrag[i] = 1/<C>(frag_i), wNeu[j] = 1/<C>(neu_j)
+    std::vector<double> wFrag(N, 1.0), wNeu(N, 1.0);
+
+    // helper: valor de C en la Erel del par (i,j)
+    auto Cij = [&](int i, int j) -> double
+    {
+        int b = binOf(ERij(i, j));
+        return (b < 0) ? 1.0 : C[b];
+    };
+
+    TH1F *hMix = new TH1F("hMix", "Erel mixed (weighted);E_{rel} [MeV];counts", nbins, xlo, xhi);
+    hMix->Sumw2();
+
+    // guardaremos la evolucion para inspeccion
+    std::vector<TH1F *> snaps;
+
+    for (int it = 0; it < nIter; ++it)
+    {
+        // (1) Actualizar pesos por particula resolviendo el sistema acoplado (ec 2.13)
+        //     <C>(p_i) = 1/(N-1) * sum_{j!=i} C(x_ij) * w_partner_j
+        //     Para el fragmento i, el partner es el neutron j (peso wNeu[j]).
+        //     Para el neutron j, el partner es el fragmento i (peso wFrag[i]).
+        //     Iteramos nInnerIter veces el sistema acoplado.
+        if (it == 0)
+        {
+            std::fill(wFrag.begin(), wFrag.end(), 1.0);
+            std::fill(wNeu.begin(), wNeu.end(), 1.0);
+        }
+        else
+        {
+            for (int inner = 0; inner < nInnerIter; ++inner)
+            {
+                // <C> para cada fragmento i (partner neutron j, peso wNeu[j])
+                std::vector<double> avgFrag(N, 0.0), avgNeu(N, 0.0);
+                for (int i = 0; i < N; ++i)
+                {
+                    double acc = 0.0, wsum = 0.0;
+                    for (int j = 0; j < N; ++j)
+                    {
+                        if (j == i)
+                            continue;
+                        acc += Cij(i, j) * wNeu[j];
+                        wsum += wNeu[j];
+                    }
+                    avgFrag[i] = (wsum > 0) ? acc / wsum : 1.0;
+                }
+                // <C> para cada neutron j (partner fragmento i, peso wFrag[i])
+                for (int j = 0; j < N; ++j)
+                {
+                    double acc = 0.0, wsum = 0.0;
+                    for (int i = 0; i < N; ++i)
+                    {
+                        if (i == j)
+                            continue;
+                        acc += Cij(i, j) * wFrag[i];
+                        wsum += wFrag[i];
+                    }
+                    avgNeu[j] = (wsum > 0) ? acc / wsum : 1.0;
+                }
+                for (int i = 0; i < N; ++i)
+                    wFrag[i] = (avgFrag[i] > 1e-9) ? 1.0 / avgFrag[i] : 1.0;
+                for (int j = 0; j < N; ++j)
+                    wNeu[j] = (avgNeu[j] > 1e-9) ? 1.0 / avgNeu[j] : 1.0;
+            }
+        }
+
+        // (2) Construir el fondo mezclado pesado: todos los pares i!=j, peso wFrag[i]*wNeu[j]
+        hMix->Reset();
+        for (int i = 0; i < N; ++i)
+            for (int j = 0; j < N; ++j)
+            {
+                if (j == i)
+                    continue;
+                hMix->Fill(ERij(i, j), wFrag[i] * wNeu[j]);
+            }
+
+        // (3) Normalizar el fondo al area de los datos y actualizar C(x) = datos/fondo
+        double sMix = hMix->Integral();
+        if (sMix <= 0)
+        {
+            std::cerr << "AVISO: fondo vacio en iter " << it << "\n";
+            break;
+        }
+        double norm = sReal / sMix;
+
+        for (int b = 1; b <= nbins; ++b)
+        {
+            double d = hReal->GetBinContent(b);
+            double m = hMix->GetBinContent(b) * norm;
+            C[b - 1] = (m > 0) ? d / m : 1.0;
+        }
+
+        // snapshot del fondo (normalizado) para ver convergencia
+        TH1F *snap = (TH1F *)hMix->Clone(Form("hMix_it%d", it));
+        snap->Scale(norm);
+        snap->SetDirectory(nullptr);
+        snaps.push_back(snap);
+
+        std::cout << "  iter " << it
+                  << "  norm=" << norm
+                  << "  C medio=" << [&]
+        { double s=0; for(double c:C) s+=c; return s/nbins; }()
+                  << std::endl;
     }
 
-    std::cout << "[eventMixing] Erel correcto (mismo evento) llenado con "
-              << hErel->GetEntries() << " cuentas\n";
+    // fondo final normalizado
+    double sMix = hMix->Integral();
+    TH1F *hMixFinal = (TH1F *)hMix->Clone("hMixNonResonant");
+    hMixFinal->SetTitle("Non-resonant background (iterative mixing);E_{rel} [MeV];counts");
+    if (sMix > 0)
+        hMixFinal->Scale(sReal / sMix);
 
-    // ---------------------------------------------------------------------
-    // 4) Event mixing: neutron del evento iN + fragmento del evento iF (iF != iN),
-    //    hasta acumular nCounts entradas en el histograma.
-    // ---------------------------------------------------------------------
-    TH1F *hMix = new TH1F(
-        "hErelMixed",
-        "Fondo no resonante (event mixing);E_{rel} [MeV];Cuentas",
-        nbins, elo, ehi);
-    hMix->SetLineColor(kRed + 1);
-    hMix->SetLineWidth(2);
+    // template area=1 (pdf) para el fit
+    TH1F *hTemplate = (TH1F *)hMixFinal->Clone("hMixTemplate");
+    hTemplate->SetTitle("Non-resonant template (area=1);E_{rel} [MeV];pdf");
+    double area = hTemplate->Integral("width");
+    if (area > 0)
+        hTemplate->Scale(1.0 / area);
 
-    TH1F *hOpaMixed = new TH1F(
-        "hOpaMixed",
-        "Angulo de apertura neutron-fragmento;#theta_{n-frag} [deg];Cuentas",
-        100, 0., 5.);
-    hOpaMixed->SetCanExtend(TH1::kXaxis);
-    hOpaMixed->SetLineColor(kRed + 1);
-    hOpaMixed->SetLineWidth(2);
+    // funcion de correlacion como histograma
+    TH1F *hC = new TH1F("hCorr", "Correlation C(x)=data/bkg;E_{rel} [MeV];C", nbins, xlo, xhi);
+    for (int b = 1; b <= nbins; ++b)
+        hC->SetBinContent(b, C[b - 1]);
 
-    TRandom3 rng(seed);
+    // --- dibujar -------------------------------------------------------------
+    TCanvas *c1 = new TCanvas("c1", "data vs non-resonant bkg", 900, 600);
+    hReal->SetLineColor(kBlack);
+    hReal->SetLineWidth(2);
+    hMixFinal->SetLineColor(kRed);
+    hMixFinal->SetLineWidth(2);
+    hReal->Draw("hist");
+    hMixFinal->Draw("hist same");
+    auto *leg = new TLegend(0.6, 0.7, 0.88, 0.88);
+    leg->AddEntry(hReal, "data", "l");
+    leg->AddEntry(hMixFinal, "non-resonant (iter.)", "l");
+    leg->Draw();
 
-    const Long64_t maxAttempts = 500LL * nCounts + 1000000LL; // salvaguarda anti-bucle infinito
-    Long64_t attempts = 0;
-    Long64_t filled = 0;
-
-    while (hMix->GetEntries() < nCounts && attempts < maxAttempts)
+    TCanvas *c2 = new TCanvas("c2", "iteration convergence", 900, 600);
+    for (size_t k = 0; k < snaps.size(); ++k)
     {
-        ++attempts;
-
-        const size_t iN = rng.Integer(N); // evento del que tomamos el NEUTRON
-        size_t iF = rng.Integer(N);       // evento del que tomamos el FRAGMENTO
-        if (iF == iN)
-            continue; // deben ser eventos distintos -> descorrelacion
-
-        const double Erel = computeErel(frags[iF], neus[iN], off, rotateToProjFrame, applyLabOffsets);
-        if (!std::isfinite(Erel))
-            continue;
-
-        hMix->Fill(Erel * 1000.0); // GeV -> MeV (igual que getData)
-        hOpaMixed->Fill(openingAngleDeg(frags[iF], neus[iN], off, rotateToProjFrame, applyLabOffsets));
-        ++filled;
+        snaps[k]->SetLineColor(k == 0 ? kBlack : (k + 1));
+        snaps[k]->SetLineWidth(2);
+        snaps[k]->Draw(k == 0 ? "hist" : "hist same");
     }
 
-    std::cout << "[eventMixing] Pares mezclados aceptados: " << filled
-              << "  (intentos: " << attempts << ")\n";
-    if (hMix->GetEntries() < nCounts)
-        std::cerr << "[eventMixing] AVISO: solo se alcanzaron " << hMix->GetEntries()
-                  << " cuentas antes del limite de intentos\n";
+    TCanvas *c3 = new TCanvas("c3", "correlation function", 900, 600);
+    hC->SetLineColor(kBlue);
+    hC->SetLineWidth(2);
+    hC->Draw("hist");
 
-    // ---------------------------------------------------------------------
-    // 5) Guardar y dibujar
-    // ---------------------------------------------------------------------
-    const std::string outPath =
-        std::string(getenv("repopath")) + "/results/final/" + outFileName.Data();
+    // --- guardar -------------------------------------------------------------
+    TFile *fout = new TFile(outName, "RECREATE");
 
-    TFile *fout = new TFile(outPath.c_str(), "RECREATE");
-    hMix->Write();
-    hErel->Write();
-    hOpaSame->Write();
-    hOpaMixed->Write();
-    hBetaFrag->Write();
-    hBetaNeu->Write();
-    hMFrag->Write();
+    // arbol con los pares reales (mismo evento) que llenan hReal (peso=1)
+    Float_t brErelReal;
+    Double_t brWeightReal;
+    TTree *tReal = new TTree("tReal", "Pares reales (mismo evento) que llenan hReal");
+    tReal->Branch("Erel", &brErelReal, "Erel/F");
+    tReal->Branch("weight", &brWeightReal, "weight/D");
+    for (int i = 0; i < N; ++i)
+    {
+        brErelReal = (Float_t)erelOf(i, i);
+        brWeightReal = 1.0;
+        tReal->Fill();
+    }
+
+    // arbol con los pares mezclados pesados (i!=j) que llenan hMixFinal
+    // (usa los pesos wFrag/wNeu de la ultima iteracion y el mismo factor
+    //  de normalizacion sReal/sMix aplicado a hMixFinal)
+    const double normFinal = (sMix > 0) ? sReal / sMix : 1.0;
+
+    Float_t brErelMix;
+    Double_t brWeightMix;
+    TTree *tMix = new TTree("tMix", "Pares mezclados (i!=j) que llenan hMixNonResonant");
+    tMix->Branch("Erel", &brErelMix, "Erel/F");
+    tMix->Branch("weight", &brWeightMix, "weight/D");
+    for (int i = 0; i < N; ++i)
+        for (int j = 0; j < N; ++j)
+        {
+            if (j == i)
+                continue;
+            brErelMix = (Float_t)ERij(i, j);
+            brWeightMix = wFrag[i] * wNeu[j] * normFinal;
+            tMix->Fill();
+        }
+
+    hReal->Write();
+    hMixFinal->Write(); // fondo no resonante (cuentas, normalizado a datos)
+    hTemplate->Write(); // template area=1 para el fit
+    hC->Write();        // funcion de correlacion final
+    tReal->Write();     // eventos (Erel, weight) que reconstruyen hReal
+    tMix->Write();      // eventos (Erel, weight) que reconstruyen hMixFinal
+    for (auto *s : snaps)
+        s->Write();
     fout->Close();
-    std::cout << "[eventMixing] Histogramas guardados en: " << outPath << "\n";
 
-    TCanvas *c = new TCanvas("cMix", "Event mixing background", 800, 600);
-    hErel->Draw("HIST");
-    hMix->Draw("HIST SAME");
-    c->Update();
-
-    TCanvas *cOpa = new TCanvas("cOpa", "Angulo de apertura: mismo evento vs mezclado", 800, 600);
-    hOpaSame->Draw("HIST");
-    hOpaMixed->Draw("HIST SAME");
-    cOpa->Update();
-
-    TCanvas *cInputs = new TCanvas("cInputs", "Distribuciones de entrada (QFS)", 1200, 400);
-    cInputs->Divide(3, 1);
-    cInputs->cd(1);
-    hBetaFrag->Draw("HIST");
-    cInputs->cd(2);
-    hBetaNeu->Draw("HIST");
-    cInputs->cd(3);
-    hMFrag->Draw("HIST");
-    cInputs->Update();
-
-    f->Close();
+    std::cout << "Guardado en: " << outName
+              << "  (hReal, hMixNonResonant, hMixTemplate, hCorr, hMix_itN, tReal, tMix)\n";
 }
