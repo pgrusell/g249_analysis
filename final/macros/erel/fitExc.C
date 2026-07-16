@@ -12,19 +12,30 @@
  **      N(Eexc) = SUM_k  A_k * [ BW_k(Erel) (x) R(Erel_true -> Eexc) ]
  **              + A_bg * BG(Eexc)
  **
- **  * BW_k -- Breit-Wigner line shape with an energy-dependent width driven
- **    by the EXACT single-neutron penetrability (closed-form spherical
- **    Bessel expressions, l = 0..3):
+ **  * BW_k -- Breit-Wigner line shape with an energy-dependent width AND the
+ **    matching level shift, both derived from the single-neutron R-matrix
+ **    channel quantities (Lane & Thomas, Rev. Mod. Phys. 30, 257 (1958)).
+ **    Gamma(E) is the imaginary part, Delta(E) the real part of the same
+ **    R-matrix object (the "reduced width amplitude x channel function"); the
+ **    two closed forms below are Eqs. 4-6 of Holl et al., Phys. Rev. C 105,
+ **    034301 (2022):
  **
- **        BW(E)    = Gamma(E) / [ (E-E0)^2 + Gamma(E)^2/4 ]
+ **        BW(E)    = Gamma(E) / [ (E - (E0+Delta(E)))^2 + Gamma(E)^2/4 ]
  **        Gamma(E) = Gamma0 * P_l(E) / P_l(E0)
+ **        Delta(E) = Gamma0 * [S_l(E0) - S_l(E)] / (2 * P_l(E0))
  **
- **    P_l is computed from rho = k*R with k = sqrt(2*mu*E)/hbar_c and a
- **    channel radius R = r0 * (A_frag^(1/3) + 1). Using the exact P_l rather
- **    than its low-energy limit E^(l+1/2) matters here: rho(E0) ~ 1 for the
- **    lowest state, i.e. exactly where the two expressions start to diverge.
- **    The line shape vanishes at E = 0, as it must (no phase space at
- **    threshold).
+ **    P_l and S_l (penetrability and shift function) are computed from
+ **    rho = k*R with k = sqrt(2*mu*E)/hbar_c and a channel radius
+ **    R = r0 * (A_frag^(1/3) + 1); both are closed-form spherical-Bessel
+ **    expressions sharing the same denominators for a given l (Lane &
+ **    Thomas, Table I). Using the exact P_l rather than its low-energy limit
+ **    E^(l+1/2) matters here: rho(E0) ~ 1 for the lowest state, i.e. exactly
+ **    where the two expressions start to diverge. The line shape vanishes at
+ **    E = 0, as it must (no phase space at threshold). Delta(E0) = 0 by
+ **    construction, so E0 is the R-matrix POLE, not the observed peak
+ **    position -- see gInitE and the fit report for the practical
+ **    consequence. Setting gUseShift = kFALSE recovers Delta = 0 (the old
+ **    behaviour), which is useful to quantify the shift as a systematic.
  **
  **  * R -- response matrix, built directly from the "ana" TTree of simFile
  **    (branches Erel and ErelTrue, both in GeV, -999 = no neutron found).
@@ -136,6 +147,11 @@ static Int_t gLorb[kMaxRes] = {2, 1, 1, 0, 0, 0};
 
 // Starting values, Erel [MeV] and Gamma0 [MeV].
 // Eexc = Erel + Sn, so with Sn = 4.2 these are 4.8, 7.4 and 10.4 MeV.
+// NOTE -- convention: with the level shift Delta(E) included in BWShape(),
+// the fitted Erel_k is the R-MATRIX POLE, not the observed peak. Since
+// Delta(E0) = 0 by construction the peak still sits close to E0, but the two
+// no longer coincide exactly once Gamma0 is not small compared to E0 (see the
+// "peak" vs "pole" lines added to the report in section 3).
 static Double_t gInitE[kMaxRes] = {0.60, 3.20, 6.20, 0., 0., 0.};
 static Double_t gInitG[kMaxRes] = {0.05, 1.20, 1.40, 0., 0., 0.};
 
@@ -156,12 +172,18 @@ static Double_t gGlim[2] = {0.01, 3.0};
 // option. Frozen parameters are reported as "(fixed)" and excluded from the
 // toy MC summary.
 static Bool_t gFixE[kMaxRes] = {kFALSE, kFALSE, kFALSE, kFALSE, kFALSE, kFALSE};
-static Bool_t gFixGamma[kMaxRes] = {kTRUE, kFALSE, kFALSE, kFALSE, kFALSE, kFALSE};
+static Bool_t gFixGamma[kMaxRes] = {true, kFALSE, kFALSE, kFALSE, kFALSE, kFALSE};
 
 // ---- Penetrability ---------------------------------------------------------
 // Channel radius R = gR0Fm * (gAFrag^(1/3) + 1) [fm]. Varying gR0Fm over
 // ~1.2-1.6 fm is a standard line-shape systematic.
 static Double_t gR0Fm = 1.4;
+
+// Include the R-matrix level shift Delta(E) in the line shape (see MODEL
+// above). kFALSE recovers Delta = 0, i.e. the line shape used before this was
+// added; run both to quantify the shift as a systematic on Erel_k and Eexc.
+static Bool_t gUseShift = kTRUE;
+
 static Double_t gAFrag = 23.;                        // fragment mass number (23O)
 static Double_t gMassNeutronMeV = 939.56542;         // MeV
 static Double_t gMassFragMeV = 23. * 931.494 + 14.6; // MeV; only the reduced
@@ -203,7 +225,7 @@ static Double_t gDataHi = 20.;
 // ============================================================================
 
 static Double_t gSn = 4.2;     // neutron separation energy [MeV]
-static Double_t gFitLo = 4.3;  // fit range [MeV], in Eexc
+static Double_t gFitLo = 4.5;  // fit range [MeV], in Eexc
 static Double_t gFitHi = 14.0; //
 static TH1D *gData = nullptr;  // data, Eexc binning
 static TH1D *gBgExc = nullptr; // mixed-event template, unit integral in range
@@ -253,17 +275,53 @@ static Double_t NeutronPenetrability(Double_t E, Int_t l)
     }
 }
 
-/// Breit-Wigner with a penetrability-driven width, normalised so that the
-/// width equals Gamma0 at the resonance energy. The overall scale is
-/// irrelevant: FoldShape() normalises the discretised shape to unit area and
-/// the amplitude is a free parameter.
+/// Exact single-neutron shift function S_l(E) (closed forms of the spherical
+/// Bessel functions), the real-part counterpart of NeutronPenetrability()'s
+/// imaginary part in the R-matrix channel quantity (Lane & Thomas, Rev. Mod.
+/// Phys. 30, 257 (1958)). The denominators are EXACTLY those of
+/// NeutronPenetrability() for the same l -- keep the two in sync if either
+/// is ever changed.
+static Double_t NeutronShift(Double_t E, Int_t l)
+{
+    if (E <= 0.)
+        return 0.;
+    const Double_t r = NeutronRho(E);
+    const Double_t r2 = r * r;
+    switch (l)
+    {
+    case 0:
+        return 0.;
+    case 1:
+        return -1. / (1. + r2);
+    case 2:
+        return -(18. + 3. * r2) / (9. + 3. * r2 + r2 * r2);
+    case 3:
+        return -(675. + 90. * r2 + 6. * r2 * r2) /
+               (225. + 45. * r2 + 6. * r2 * r2 + r2 * r2 * r2);
+    default:
+        // Not reached for the l values used here; S_l -> 0 as rho -> 0 for
+        // any l, so this is the sane low-energy fallback.
+        return 0.;
+    }
+}
+
+/// Breit-Wigner with a penetrability-driven width and its R-matrix level
+/// shift, normalised so that the width equals Gamma0 at the resonance energy
+/// and Delta(E0) = 0 by construction. The overall scale is irrelevant:
+/// FoldShape() normalises the discretised shape to unit area and the
+/// amplitude is a free parameter. gUseShift = kFALSE drops Delta (Delta = 0),
+/// i.e. the line shape used before the shift was added.
 static Double_t BWShape(Double_t E, Double_t E0, Double_t G0, Int_t l)
 {
     if (E <= 0. || E0 <= 0. || G0 <= 0.)
         return 0.;
     const Double_t p0 = NeutronPenetrability(E0, l);
     const Double_t G = (p0 > 0.) ? G0 * NeutronPenetrability(E, l) / p0 : G0;
-    const Double_t d = E - E0;
+    const Double_t Delta = (gUseShift && p0 > 0.)
+                               ? G0 * (NeutronShift(E0, l) - NeutronShift(E, l)) /
+                                     (2. * p0)
+                               : 0.;
+    const Double_t d = E - E0 - Delta;
     return G / (d * d + 0.25 * G * G);
 }
 
@@ -644,7 +702,7 @@ void fitExc(const char *dataFile = gDataFileDef,
             const char *mixFile = gMixFileDef,
             const char *cut = "califa_opa > 1.25 && califa_opa < 1.65",
             Double_t Sn = 4.2,
-            Double_t fitLo = 4.3,
+            Double_t fitLo = 4.5,
             Double_t fitHi = 20,
             Int_t nToys = 0,
             const char *outFile = "fitExc_results.root")
@@ -741,6 +799,11 @@ void fitExc(const char *dataFile = gDataFileDef,
     std::cout << "  channel radius R    = " << std::setprecision(3) << Rfm
               << " fm (r0 = " << gR0Fm << " fm)\n\n";
 
+    // Truth-axis range of the response matrix, used below for the numerical
+    // peak scan (same range FoldShape() integrates the line shape over).
+    const Double_t truthLo = gRespN->GetXaxis()->GetXmin();
+    const Double_t truthHi = gRespN->GetXaxis()->GetXmax();
+
     for (Int_t k = 0; k < gNRes; ++k)
     {
         std::cout << "  Resonance " << k + 1 << "  (l = " << gLorb[k]
@@ -765,6 +828,48 @@ void fitExc(const char *dataFile = gDataFileDef,
         std::cout << " MeV\n";
         std::cout << "     Yield  = " << p[3 * k] << " +- " << e[3 * k]
                   << "   (efficiency-corrected decays)\n";
+
+        // ---- level-shift diagnostics ----------------------------------
+        // Erel_k is the R-matrix POLE (Delta(E0) = 0 by construction), not
+        // the observed peak -- see the gInitE note and the MODEL header.
+        // Report S_l(E0) and Delta(E) at the fit-range edges to gauge the
+        // size of the effect, and the numerically-found peak for comparison.
+        const Double_t E0 = p[3 * k + 1];
+        const Double_t G0 = p[3 * k + 2];
+        const Int_t l = gLorb[k];
+        const Double_t p0 = NeutronPenetrability(E0, l);
+        const Double_t sl0 = NeutronShift(E0, l);
+        std::cout << "     S_l(E0)= " << sl0 << "\n";
+
+        auto deltaAt = [&](Double_t E) -> Double_t
+        {
+            if (p0 <= 0. || E <= 0.)
+                return 0.;
+            return G0 * (sl0 - NeutronShift(E, l)) / (2. * p0);
+        };
+        const Double_t ErelLo = gFitLo - gSn;
+        const Double_t ErelHi = gFitHi - gSn;
+        std::cout << "     Delta(E_fitLo=" << ErelLo << ")=" << deltaAt(ErelLo)
+                  << " MeV,  Delta(E_fitHi=" << ErelHi << ")=" << deltaAt(ErelHi)
+                  << " MeV   (gUseShift = " << (gUseShift ? "kTRUE" : "kFALSE")
+                  << ")\n";
+
+        Double_t erelPeak = E0;
+        Double_t bwMax = -1.;
+        const Int_t nScan = 2000;
+        for (Int_t s = 0; s <= nScan; ++s)
+        {
+            const Double_t E = truthLo + (truthHi - truthLo) * s / nScan;
+            const Double_t bw = BWShape(E, E0, G0, l);
+            if (bw > bwMax)
+            {
+                bwMax = bw;
+                erelPeak = E;
+            }
+        }
+        std::cout << "     pole Erel = " << E0 << " MeV,  peak Erel = "
+                  << erelPeak << " MeV   (numerical scan over truth range ["
+                  << truthLo << ", " << truthHi << "] MeV)\n";
     }
     std::cout << "  Background (mixed events) = " << p[3 * gNRes] << " +- "
               << e[3 * gNRes] << " counts in range\n";
@@ -1075,7 +1180,7 @@ void fitExc(const char *dataFile = gDataFileDef,
     hFrame->GetYaxis()->SetNdivisions(505);
     hFrame->Draw("AXIS");
 
-    for (Double_t y : {-2., 0., 2.})
+    for (Double_t y : {-1., 0., 1.})
     {
         auto *l = new TLine(gDataLo, y, gDataHi, y);
         l->SetLineColor(y == 0. ? kGray + 1 : kGray);
