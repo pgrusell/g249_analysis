@@ -23,7 +23,7 @@ void eventMixing(const char *inName =
                  const char *outName = "23O_mixing_iterative.root",
                  int nIter = 25,                                    // iteraciones del algoritmo (Fig 2.3 usa ~10)
                  int nInnerIter = 3,                                // sub-iteraciones para <C>(p_i) (ec. 2.13)
-                 int nbins = 150, double xlo = -1, double xhi = 30) // MeV, como fErel
+                 int nbins = 150, double xlo = -1, double xhi = 20) // MeV, como fErel
 {
     // --- constantes y offsets (23O1n.txt) ------------------------------------
     const double m_neut = 0.939565; // GeV

@@ -1,4 +1,4 @@
-void simErelDelta(Int_t nEvents = 1000000, TString fileName = "full", TString genFile = "gen/erel_full2.out", int genType = 0)
+void simErelDelta(Int_t nEvents = 10000000, TString fileName = "full", TString genFile = "gen/response.out", int genType = 0)
 {
     // Timer
     TStopwatch timer;
