@@ -1,138 +1,5 @@
-/** ---------------------------------------------------------------------------
- **
- **  fitExc.C
- **
- **  Fit of the 24O* excitation-energy spectrum from the 1n-breakup channel
- **      25F(p,2p)24O* -> 23O + n     (experiment G249)
- **
- **  -------------------------------------------------------------------------
- **  MODEL
- **  -------------------------------------------------------------------------
- **
- **      N(Eexc) = SUM_k  A_k * [ BW_k(Erel) (x) R(Erel_true -> Eexc) ]
- **              + A_bg * BG(Eexc)
- **
- **  * BW_k -- Breit-Wigner line shape with an energy-dependent width AND the
- **    matching level shift, both derived from the single-neutron R-matrix
- **    channel quantities (Lane & Thomas, Rev. Mod. Phys. 30, 257 (1958)).
- **    Gamma(E) is the imaginary part, Delta(E) the real part of the same
- **    R-matrix object (the "reduced width amplitude x channel function"); the
- **    two closed forms below are Eqs. 4-6 of Holl et al., Phys. Rev. C 105,
- **    034301 (2022):
- **
- **        BW(E)    = Gamma(E) / [ (E - (E0+Delta(E)))^2 + Gamma(E)^2/4 ]
- **        Gamma(E) = Gamma0 * P_l(E) / P_l(E0)
- **        Delta(E) = Gamma0 * [S_l(E0) - S_l(E)] / (2 * P_l(E0))
- **
- **    P_l and S_l (penetrability and shift function) are computed from
- **    rho = k*R with k = sqrt(2*mu*E)/hbar_c and a channel radius
- **    R = r0 * (A_frag^(1/3) + 1); both are closed-form spherical-Bessel
- **    expressions sharing the same denominators for a given l (Lane &
- **    Thomas, Table I). Using the exact P_l rather than its low-energy limit
- **    E^(l+1/2) matters here: rho(E0) ~ 1 for the lowest state, i.e. exactly
- **    where the two expressions start to diverge. The line shape vanishes at
- **    E = 0, as it must (no phase space at threshold). Delta(E0) = 0 by
- **    construction, so E0 is the R-matrix POLE, not the observed peak
- **    position -- see gInitE and the fit report for the practical
- **    consequence. Setting gUseShift = kFALSE recovers Delta = 0 (the old
- **    behaviour), which is useful to quantify the shift as a systematic.
- **
- **  * R -- response matrix, built directly from the "ana" TTree of simFile
- **    (branches Erel and ErelTrue, both in GeV, -999 = no neutron found).
- **        X axis: Erel_true [MeV], gNTrueBins bins over the range found in
- **                the tree itself (rounded outward to 0.1 MeV).
- **        Y axis: Eexc = Erel*1000 + Sn [MeV], with EXACTLY the data binning,
- **                so folding needs no rebinning -- bin j of the folded
- **                spectrum IS bin j of the data histogram.
- **    Each truth column is divided by the number of GENERATED events in that
- **    truth bin, so the column sum equals the (Erel-dependent) efficiency and
- **    the fitted A_k are efficiency-corrected yields. The matrix is used raw,
- **    with no smoothing or parametrisation: the strongly asymmetric response
- **    near threshold (events can only migrate upward from Erel = 0) is thus
- **    reproduced exactly.
- **
- **  * BG -- non-resonant background from ITERATIVE EVENT MIXING (data-driven,
- **    produced by eventMixingIterative.C). Read from the "tMix" TTree of
- **    mixFile: branch Erel is ALREADY in MeV and each entry carries a
- **    "weight". Because it is built from reconstructed particles of the real
- **    data, resolution/acceptance/efficiency are included by construction and
- **    it is NOT folded through the response matrix. It enters as a fixed
- **    shape normalised to unit integral inside the fit range, so the free
- **    parameter A_bg is directly the number of background counts in range.
- **
- **  -------------------------------------------------------------------------
- **  FIT
- **  -------------------------------------------------------------------------
- **
- **  Binned Poisson negative log-likelihood (Minuit2 / Migrad + Hesse):
- **
- **      -lnL = SUM_bins [ m_b - n_b * ln(m_b) ]
- **
- **  (parameter-independent terms dropped, hence the negative FVAL: only
- **  DIFFERENCES of NLL between fits are meaningful). Poisson rather than
- **  chi2 because the tail bins hold only a handful of counts. The Pearson
- **  chi2 printed in the report is a goodness-of-fit indicator only -- it
- **  never enters the minimisation.
- **
- **  Uncertainties are obtained in two independent ways:
- **    - Hesse (parabolic, symmetric), and
- **    - toy MC / parametric bootstrap: gNToys pseudo-datasets are drawn
- **      bin-by-bin from the best-fit model with Poisson fluctuations and
- **      refitted. The 16/50/84% quantiles of each marginal give asymmetric
- **      uncertainties, median-minus-nominal gives the bias, and the toy
- **      sample also yields the full parameter correlation matrix.
- **      When the two methods disagree (typically because a parameter sits
- **      near a limit, or the covariance matrix had to be forced positive
- **      definite), the toy numbers are the ones to quote.
- **
- **  All Erel <-> Eexc conversions use Eexc = Erel + Sn. Note that Sn cancels
- **  in the fit itself (the same shift is applied to the data and to the Y
- **  axis of the response matrix); it only matters for quoting Eexc.
- **
- **  The fit range is capped at Eexc = Sn + trueHi, the coverage of the
- **  response matrix: beyond that the folded model is undefined, not zero.
- **
- **  -------------------------------------------------------------------------
- **  USAGE
- **  -------------------------------------------------------------------------
- **
- **      root -l 'fitExc.C()'                    // default paths below
- **      root -l 'fitExc.C+()'                   // compiled (recommended)
- **      root -l 'fitExc.C("data.root","sim.root","mix.root")'
- **
- **  Number of resonances, l assignments, starting values, parameter limits
- **  and which parameters are frozen are all set in the configuration block
- **  right below -- no need to touch the fit code.
- **
- ** ------------------------------------------------------------------------ */
-
-#include "TAxis.h"
-#include "TCanvas.h"
-#include "TFile.h"
-#include "TGraph.h"
-#include "TH1D.h"
-#include "TH2D.h"
-#include "TLatex.h"
-#include "TLegend.h"
-#include "TLine.h"
-#include "TMath.h"
-#include "TPad.h"
-#include "TRandom.h"
-#include "TString.h"
-#include "TStyle.h"
-#include "TTree.h"
-#include "Math/Factory.h"
-#include "Math/Functor.h"
-#include "Math/Minimizer.h"
-
-#include <algorithm>
-#include <functional>
-#include <iomanip>
-#include <iostream>
-#include <vector>
-
 // ============================================================================
-//  CONFIGURATION -- edit here
+//  CONFIGURATION
 // ============================================================================
 
 static const Int_t kMaxRes = 6; // storage size of the per-resonance arrays
@@ -140,48 +7,28 @@ static const Int_t kMaxRes = 6; // storage size of the per-resonance arrays
 // ---- Resonances ------------------------------------------------------------
 static Int_t gNRes = 3; // number of Breit-Wigner resonances
 
-// Orbital angular momentum of the emitted neutron, per resonance. Enters the
-// penetrability, i.e. the energy dependence of the width. Only l = 0..3 are
-// supported by the closed-form expressions.
+// Angular momentum of every resonance
 static Int_t gLorb[kMaxRes] = {2, 1, 1, 0, 0, 0};
 
-// Starting values, Erel [MeV] and Gamma0 [MeV].
-// Eexc = Erel + Sn, so with Sn = 4.2 these are 4.8, 7.4 and 10.4 MeV.
-// NOTE -- convention: with the level shift Delta(E) included in BWShape(),
-// the fitted Erel_k is the R-MATRIX POLE, not the observed peak. Since
-// Delta(E0) = 0 by construction the peak still sits close to E0, but the two
-// no longer coincide exactly once Gamma0 is not small compared to E0 (see the
-// "peak" vs "pole" lines added to the report in section 3).
+// Starting energies and gammas for the resonances
 static Double_t gInitE[kMaxRes] = {0.60, 3.20, 6.20, 0., 0., 0.};
 static Double_t gInitG[kMaxRes] = {0.05, 1.20, 1.40, 0., 0., 0.};
 
-// Per-resonance limits on Erel [MeV]. Keep them wide enough that the fitted
-// value does not end up sitting ON a limit -- a parameter at its limit has a
-// meaningless Hesse error and biases its neighbours.
+// Limits in the values of the resonances energies
 static Double_t gElo[kMaxRes] = {0.30, 2.50, 5.00, 0., 0., 0.};
 static Double_t gEhi[kMaxRes] = {0.90, 3.90, 7.50, 0., 0., 0.};
 
-// Common limits on Gamma0 [MeV]. The upper limit is deliberately modest: an
-// over-wide BW degenerates with the background template and turns into a
-// pseudo-continuum.
-static Double_t gGlim[2] = {0.01, 3.0};
+// Limits in the gammas
+static Double_t gGlim[2] = {0.01, 5.0};
 
-// Freeze individual parameters (e.g. to a literature value, or because the
-// data have no sensitivity). A width well below the experimental resolution
-// cannot be measured; freezing it and quoting an upper limit is the honest
-// option. Frozen parameters are reported as "(fixed)" and excluded from the
-// toy MC summary.
+// Freeze different parameters
 static Bool_t gFixE[kMaxRes] = {kFALSE, kFALSE, kFALSE, kFALSE, kFALSE, kFALSE};
 static Bool_t gFixGamma[kMaxRes] = {true, kFALSE, kFALSE, kFALSE, kFALSE, kFALSE};
 
 // ---- Penetrability ---------------------------------------------------------
-// Channel radius R = gR0Fm * (gAFrag^(1/3) + 1) [fm]. Varying gR0Fm over
-// ~1.2-1.6 fm is a standard line-shape systematic.
-static Double_t gR0Fm = 1.4;
+// Channel radius
+static Double_t gR0Fm = 1.3;
 
-// Include the R-matrix level shift Delta(E) in the line shape (see MODEL
-// above). kFALSE recovers Delta = 0, i.e. the line shape used before this was
-// added; run both to quantify the shift as a systematic on Erel_k and Eexc.
 static Bool_t gUseShift = kTRUE;
 
 static Double_t gAFrag = 23.;                        // fragment mass number (23O)
@@ -191,23 +38,18 @@ static Double_t gMassFragMeV = 23. * 931.494 + 14.6; // MeV; only the reduced
                                                      // precision is plenty
 
 // ---- Numerics --------------------------------------------------------------
-// Sub-samples used to integrate a line shape inside each truth bin. Narrow
-// resonances (Gamma << bin width) demand more than a mid-point evaluation.
-static Int_t gNSub = 10;
-
-// Truth-axis binning of the response matrix. The RANGE is auto-detected from
-// the simulation tree; only the number of bins is set here.
+// Sub samples of the covariance matrix (not used now)
+static Int_t gNSub = 1;
 static Int_t gNTrueBins = 200;
 
 // ---- Toy MC ----------------------------------------------------------------
-// Number of pseudo-experiments (0 disables). ~100 is enough for a quick look,
-// 500-1000 for final numbers (the tail quantiles converge as 1/sqrt(N)).
+// just for uncertainties
 static Int_t gNToys = 500;
 static UInt_t gToySeed = 12345;
 
 // ---- Input files -----------------------------------------------------------
 static const char *gDataFileDef =
-    "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/23O_analyzed_final.root";
+    "/nucl_lustre/pablogrusell/g249/g249_analysis/results/dataFiles/23O_analyzed.root";
 static const char *gSimFileDef =
     "/nucl_lustre/pablogrusell/g249/g249_analysis/final/macros/erel/ana_results/full2_analysis.root";
 static const char *gMixFileDef =
@@ -225,7 +67,7 @@ static Double_t gDataHi = 20.;
 // ============================================================================
 
 static Double_t gSn = 4.2;     // neutron separation energy [MeV]
-static Double_t gFitLo = 4.5;  // fit range [MeV], in Eexc
+static Double_t gFitLo = 4.2;  // fit range [MeV], in Eexc
 static Double_t gFitHi = 14.0; //
 static TH1D *gData = nullptr;  // data, Eexc binning
 static TH1D *gBgExc = nullptr; // mixed-event template, unit integral in range
@@ -702,7 +544,7 @@ void fitExc(const char *dataFile = gDataFileDef,
             const char *mixFile = gMixFileDef,
             const char *cut = "califa_opa > 1.25 && califa_opa < 1.65",
             Double_t Sn = 4.2,
-            Double_t fitLo = 4.5,
+            Double_t fitLo = 4.2,
             Double_t fitHi = 20,
             Int_t nToys = 0,
             const char *outFile = "fitExc_results.root")
