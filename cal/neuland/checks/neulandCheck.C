@@ -1,5 +1,5 @@
 void neulandCheck(std::string inFilePath = "/nucl_lustre/pablogrusell/g249/root_files/unpackedData/g249_all_det_offline_0001_20260223_132131_160_0.root",
-                  std::string outFilePath = "out_reduced.root")
+                  std::string outFilePath = "out_reduced.root", bool offsetsVal = true)
 {
     auto *f = TFile::Open(inFilePath.c_str(), "READ");
     if (f == nullptr || f->IsZombie())
@@ -63,6 +63,47 @@ void neulandCheck(std::string inFilePath = "/nucl_lustre/pablogrusell/g249/root_
     cutg_incoming->SetPoint(12, 8.31948, 2.78611);
     cutg_incoming->SetPoint(13, 8.23352, 2.7854);
 
+    // tof offsets
+
+    std::vector<double> offsets(1300);
+
+    if (offsetsVal)
+    {
+        offsets[19 - 1] = 2.1280;
+        offsets[30 - 1] = 1.3686;
+        offsets[62 - 1] = -3.3266;
+        offsets[72 - 1] = -3.3507;
+        offsets[79 - 1] = -0.6977;
+        offsets[88 - 1] = -3.1225;
+        offsets[115 - 1] = 4.6680;
+        offsets[166 - 1] = 2.5123;
+        offsets[167 - 1] = -2.5644;
+        offsets[168 - 1] = 4.5560;
+        offsets[201 - 1] = 5.1455;
+        offsets[233 - 1] = 2.9769;
+        offsets[280 - 1] = 3.8662;
+        offsets[295 - 1] = 2.7434;
+        offsets[339 - 1] = 3.2547;
+        offsets[371 - 1] = -3.4727;
+        offsets[393 - 1] = 6.0279;
+        offsets[456 - 1] = -2.7744;
+        offsets[599 - 1] = 3.3694;
+        offsets[622 - 1] = 5.0871;
+        offsets[663 - 1] = 3.1136;
+        offsets[765 - 1] = 7.2081;
+        offsets[767 - 1] = 2.5812;
+        offsets[875 - 1] = 7.2277;
+        offsets[930 - 1] = 2.7249;
+        offsets[934 - 1] = 1.8959;
+        offsets[981 - 1] = 0.7595;
+        offsets[1028 - 1] = 2.0740;
+        offsets[1162 - 1] = 4.9011;
+        offsets[1165 - 1] = 2.4801;
+        offsets[1191 - 1] = 1.9692;
+        offsets[1227 - 1] = -1.6468;
+        offsets[1273 - 1] = 2.5166;
+    }
+
     for (Long64_t i = 0; i < nEntries; i++)
     {
         evt->GetEntry(i);
@@ -104,12 +145,15 @@ void neulandCheck(std::string inFilePath = "/nucl_lustre/pablogrusell/g249/root_
                 zneu = zNew;
                 xneu = neuhit->GetPosition().X();
                 yneu = neuhit->GetPosition().Y();
-                tneu = neuhit->GetT();
                 paddle = neuhit->GetPaddle();
+                tneu = neuhit->GetT(); //+ offsets[paddle - 1];
             }
         }
 
-        tof = tneu / (TMath::Sqrt(zneu * zneu + xneu * xneu + yneu * yneu)) * 1557.0;
+        // tof = tneu / (TMath::Sqrt(zneu * zneu + xneu * xneu + yneu * yneu)) * 1557.0;
+        double d = TMath::Sqrt(xneu * xneu + yneu * yneu + zneu * zneu);
+        tof = tneu / d * 1557.0 + offsets[paddle];
+        tneu += 1557. / d * offsets[paddle];
 
         outTree->Fill();
     }
