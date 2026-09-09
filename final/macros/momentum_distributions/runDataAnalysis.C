@@ -5,7 +5,7 @@ void runDataAnalysis(TString mode = "ana23")
 
     if (mode == "ana23")
     {
-        auto *da = new DataAnalysis("/nucl_lustre/pablogrusell/g249/g249_analysis/results/dataFiles/data_23O_neu_off.root", "23O_analyzed_neu_of.root", true);
+        auto *da = new DataAnalysis("/nucl_lustre/pablogrusell/g249/g249_analysis/results/data_23O.root", "23O_analyzed.root", true);
         da->setOffsetsFromTxt("23O1n.txt");
         da->getData();
     }
