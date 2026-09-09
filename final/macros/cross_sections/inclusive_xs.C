@@ -150,7 +150,7 @@ void inclusive_xs()
     R = kNumFragmentsWithNeuland / eff_neu / nproj / eff_p2p_tot;
     C = kMt / kRho / kZTarget / kNa * 1e24 * 1e3;
 
-    dR = R * TMath::Sqrt(1.0 / kNumFragmentsWithNeuland / eff_neu + 1.0 / kNumUnreacted);
+    dR = R * TMath::Sqrt(1.0 / kNumFragmentsWithNeuland + 1.0 / kNumUnreacted);
     dSigma = C / (1.0 - R) * dR;
 
     std::cout << xs << " +/- " << dSigma << " [mb]\n";
