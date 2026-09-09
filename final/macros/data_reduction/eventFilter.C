@@ -224,16 +224,9 @@ static ReactionConfig makeReactionConfig(const TString &reaction)
         if (reaction == "25F23O")
         {
 
-                ////// VERY IMPORTANT CHANGE THISSSSS 23O HAS NEUTRONSSSS
-                /*
                 cfg = {2.785, 2.88,
                        23.015696686 - 8 * 0.00511,
                        "data_23O", true, false};
-                */
-
-                cfg = {2.785, 2.88,
-                       23.015696686 - 8 * 0.00511,
-                       "data_23O_neu_off", true, false};
         }
         else if (reaction == "25F22O")
         {
