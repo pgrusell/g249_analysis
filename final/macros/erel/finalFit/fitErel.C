@@ -49,7 +49,11 @@ struct FoldedNLLs
     {
         double v = 0.;
         for (int k = 0; k < nRes; k++)
-            v += p[3 * k] * BW(E, p[3 * k + 1], p[3 * k + 2], lvals[k]);
+        {
+            const double amplitude = p[3 * k];
+            if (amplitude != 0.)
+                v += amplitude * BW(E, p[3 * k + 1], p[3 * k + 2], lvals[k]);
+        }
         return v;
     }
 
