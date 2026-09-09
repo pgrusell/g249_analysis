@@ -106,6 +106,7 @@ static const std::vector<std::pair<double, double>> INCOMING_25F_POLYGON = {
 struct NFirst
 {
         int idx;
+        int paddle;
         double tns;
         TVector3 pos;
 };
@@ -233,7 +234,7 @@ static ReactionConfig makeReactionConfig(const TString &reaction)
 
                 cfg = {2.785, 2.88,
                        23.015696686 - 8 * 0.00511,
-                       "data_23O_neu_off", true, false};
+                       "data_23O_no_rand", true, false};
         }
         else if (reaction == "25F22O")
         {
@@ -546,7 +547,7 @@ static ROOT::RDF::RNode defineNeutronColumns(ROOT::RDF::RNode node)
         return node
             .Define("n_first", [](TClonesArray &nl)
                     {
-            int idx = -1;  double bestZ = 1e99, bestT = -1;
+            int idx = -1, bestPaddle = -1;  double bestZ = 1e99, bestT = -1;
             TVector3 bestPos(0, 0, 0);
             for (int i = 0; i < nl.GetEntriesFast(); ++i)
             {
@@ -554,24 +555,16 @@ static ROOT::RDF::RNode defineNeutronColumns(ROOT::RDF::RNode node)
                 double z = h->GetPosition().Z(), t = h->GetT();
                 if (t <= 76.0 && z < bestZ)
                 {
-                    bestZ = z;  bestT = t;  idx = i;
+                                        bestZ = z;  bestT = t;  idx = i;  bestPaddle = h->GetPaddle();
                     TVector3 pos = h->GetPosition();
-                    int paddle = h->GetPaddle();
+                                        int paddle = bestPaddle;
                                         double flightLength = pos.Mag();
                                         if (flightLength > 0)
                                                 bestT += 1557.0 / flightLength * neulandPaddleOffset(paddle);
-                    static thread_local TRandom3 rng(0);
-                    if (((paddle / 50) % 2) == 0)
-                        bestPos.SetXYZ(pos.X(),
-                                       pos.Y() + rng.Uniform(-2.5, 2.5),
-                                       pos.Z() + rng.Uniform(-2.5, 2.5));
-                    else
-                        bestPos.SetXYZ(pos.X() + rng.Uniform(-2.5, 2.5),
-                                       pos.Y(),
-                                       pos.Z() + rng.Uniform(-2.5, 2.5));
+                                        bestPos = pos;
                 }
             }
-            return NFirst{idx, bestT, bestPos}; }, {"NeulandHits"})
+                        return NFirst{idx, bestPaddle, bestT, bestPos}; }, {"NeulandHits"})
             .Filter([](const NFirst &nf)
                     { return nf.idx >= 0; }, {"n_first"})
             .Define("beta_neu", [](const NFirst &nf)
@@ -603,7 +596,9 @@ static ROOT::RDF::RNode defineNeutronColumns(ROOT::RDF::RNode node)
             .Define("z_neu_hit", [](const NFirst &nf)
                     { return nf.pos.Z(); }, {"n_first"})
             .Define("tof_neuland", [](const NFirst &nf)
-                    { return nf.tns; }, {"n_first"});
+                    { return nf.tns; }, {"n_first"})
+            .Define("paddle_neu", [](const NFirst &nf)
+                    { return nf.paddle; }, {"n_first"});
 }
 
 // ─── Output column lists ────────────────────────────────────────────────────
@@ -639,7 +634,8 @@ static std::vector<std::string> buildOutputColumns(bool hasNeutrons)
 
         if (hasNeutrons)
                 cols.insert(cols.end(), {"px_neu", "py_neu", "pz_neu",
-                                         "x_neu_hit", "y_neu_hit", "z_neu_hit", "tof_neuland"});
+                                         "x_neu_hit", "y_neu_hit", "z_neu_hit", "tof_neuland",
+                                         "paddle_neu"});
 
         cols.insert(cols.end(), {"px_in", "py_in", "pz_in"});
 
@@ -666,7 +662,7 @@ void eventFilter(std::string setting = "",
                  bool test = false,
                  bool append = false)
 {
-        // ROOT::EnableImplicitMT(1);
+        ROOT::EnableImplicitMT(8);
 
         // ── Load file list ──────────────────────────────────────────────────
         const std::string listTxt =
