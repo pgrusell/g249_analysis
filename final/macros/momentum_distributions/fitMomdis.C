@@ -787,7 +787,7 @@ void fitMomdis(double erelMin = 6.5 - 4.2, double erelMax = 8.5 - 4.2,
     //     "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/24O_analyzed_test.root";
 
     std::string inFileExp =
-        "/nucl_lustre/pablogrusell/g249/g249_analysis/results/dataFiles/23O_analyzed.root";
+        "/nucl_lustre/pablogrusell/g249/g249_analysis/results/final/23O_analyzed_neu_of.root";
 
     const int nC = (int)inFilesTheo.size();
     const int nBinsRef = 30;

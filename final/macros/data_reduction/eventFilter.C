@@ -29,6 +29,52 @@ static constexpr double C_CM_PER_NS = 29.9792458;
 static constexpr double FIB33_OFF = 25.;
 static constexpr double FIB31_OFF = -25.;
 
+static double neulandPaddleOffset(int paddle)
+{
+        static const std::array<double, 1300> offsets = []
+        {
+                std::array<double, 1300> values{};
+                values[19 - 1] = 2.1280;
+                values[30 - 1] = 1.3686;
+                values[62 - 1] = -3.3266;
+                values[72 - 1] = -3.3507;
+                values[79 - 1] = -0.6977;
+                values[88 - 1] = -3.1225;
+                values[115 - 1] = 4.6680;
+                values[166 - 1] = 2.5123;
+                values[167 - 1] = -2.5644;
+                values[168 - 1] = 4.5560;
+                values[201 - 1] = 5.1455;
+                values[233 - 1] = 2.9769;
+                values[280 - 1] = 3.8662;
+                values[295 - 1] = 2.7434;
+                values[339 - 1] = 3.2547;
+                values[371 - 1] = -3.4727;
+                values[393 - 1] = 6.0279;
+                values[456 - 1] = -2.7744;
+                values[599 - 1] = 3.3694;
+                values[622 - 1] = 5.0871;
+                values[663 - 1] = 3.1136;
+                values[765 - 1] = 7.2081;
+                values[767 - 1] = 2.5812;
+                values[875 - 1] = 7.2277;
+                values[930 - 1] = 2.7249;
+                values[934 - 1] = 1.8959;
+                values[981 - 1] = 0.7595;
+                values[1028 - 1] = 2.0740;
+                values[1162 - 1] = 4.9011;
+                values[1165 - 1] = 2.4801;
+                values[1191 - 1] = 1.9692;
+                values[1227 - 1] = -1.6468;
+                values[1273 - 1] = 2.5166;
+                return values;
+        }();
+
+        return paddle >= 1 && paddle <= (int)offsets.size()
+                   ? offsets[paddle - 1]
+                   : 0.0;
+}
+
 // ─── 25F incoming graphical cut (polygon from TCutG) ────────────────────────
 static const std::vector<std::pair<double, double>> INCOMING_25F_POLYGON = {
     {2.77227, 8.55258},
@@ -187,7 +233,7 @@ static ReactionConfig makeReactionConfig(const TString &reaction)
 
                 cfg = {2.785, 2.88,
                        23.015696686 - 8 * 0.00511,
-                       "data_23O", true, false};
+                       "data_23O_neu_off", true, false};
         }
         else if (reaction == "25F22O")
         {
@@ -511,6 +557,9 @@ static ROOT::RDF::RNode defineNeutronColumns(ROOT::RDF::RNode node)
                     bestZ = z;  bestT = t;  idx = i;
                     TVector3 pos = h->GetPosition();
                     int paddle = h->GetPaddle();
+                                        double flightLength = pos.Mag();
+                                        if (flightLength > 0)
+                                                bestT += 1557.0 / flightLength * neulandPaddleOffset(paddle);
                     static thread_local TRandom3 rng(0);
                     if (((paddle / 50) % 2) == 0)
                         bestPos.SetXYZ(pos.X(),
