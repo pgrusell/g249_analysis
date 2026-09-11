@@ -110,6 +110,13 @@ struct NFirst
         TVector3 pos;
 };
 
+/// Per-event collection of all NeuLAND hits passing the time cut.
+struct NAllHits
+{
+        std::vector<int> paddle;
+        std::vector<double> x, y, z, t;
+};
+
 /// All PID / kinematic cuts for a single reaction channel.
 struct ReactionConfig
 {
@@ -596,7 +603,51 @@ static ROOT::RDF::RNode defineNeutronColumns(ROOT::RDF::RNode node)
             .Define("z_neu_hit", [](const NFirst &nf)
                     { return nf.pos.Z(); }, {"n_first"})
             .Define("tof_neuland", [](const NFirst &nf)
-                    { return nf.tns; }, {"n_first"});
+                    { return nf.tns; }, {"n_first"})
+            .Define("n_all", [](TClonesArray &nl)
+                    {
+            NAllHits out;
+            static thread_local TRandom3 rng(0);
+            for (int i = 0; i < nl.GetEntriesFast(); ++i)
+            {
+                auto *h = static_cast<R3BNeulandHit *>(nl.UncheckedAt(i));
+                double t = h->GetT();
+                if (t > 76.0)
+                    continue;
+
+                TVector3 pos = h->GetPosition();
+                int paddle = h->GetPaddle();
+                double flightLength = pos.Mag();
+                if (flightLength > 0)
+                    t += 1557.0 / flightLength * neulandPaddleOffset(paddle);
+
+                TVector3 smeared;
+                if (((paddle / 50) % 2) == 0)
+                    smeared.SetXYZ(pos.X(),
+                                   pos.Y() + rng.Uniform(-2.5, 2.5),
+                                   pos.Z() + rng.Uniform(-2.5, 2.5));
+                else
+                    smeared.SetXYZ(pos.X() + rng.Uniform(-2.5, 2.5),
+                                   pos.Y(),
+                                   pos.Z() + rng.Uniform(-2.5, 2.5));
+
+                out.paddle.push_back(paddle);
+                out.x.push_back(smeared.X());
+                out.y.push_back(smeared.Y());
+                out.z.push_back(smeared.Z());
+                out.t.push_back(t);
+            }
+            return out; }, {"NeulandHits"})
+            .Define("n_paddle", [](const NAllHits &a)
+                    { return a.paddle; }, {"n_all"})
+            .Define("n_x", [](const NAllHits &a)
+                    { return a.x; }, {"n_all"})
+            .Define("n_y", [](const NAllHits &a)
+                    { return a.y; }, {"n_all"})
+            .Define("n_z", [](const NAllHits &a)
+                    { return a.z; }, {"n_all"})
+            .Define("n_t", [](const NAllHits &a)
+                    { return a.t; }, {"n_all"});
 }
 
 // ─── Output column lists ────────────────────────────────────────────────────
@@ -632,7 +683,8 @@ static std::vector<std::string> buildOutputColumns(bool hasNeutrons)
 
         if (hasNeutrons)
                 cols.insert(cols.end(), {"px_neu", "py_neu", "pz_neu",
-                                         "x_neu_hit", "y_neu_hit", "z_neu_hit", "tof_neuland"});
+                                         "x_neu_hit", "y_neu_hit", "z_neu_hit", "tof_neuland",
+                                         "n_paddle", "n_x", "n_y", "n_z", "n_t"});
 
         cols.insert(cols.end(), {"px_in", "py_in", "pz_in"});
 
