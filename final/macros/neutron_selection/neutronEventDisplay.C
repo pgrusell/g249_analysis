@@ -80,7 +80,7 @@
 
 static const char *kNedDefaultFile =
     "/nucl_lustre/pablogrusell/g249/g249_analysis/results/dataFiles/"
-    "data_22O_with_neutrons.root";
+    "data_23O.root";
 static const char *kNedTreeName = "FilterDataTree";
 
 // quasi-free scattering selection on the CALIFA opening angle [rad]

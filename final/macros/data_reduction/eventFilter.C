@@ -31,48 +31,94 @@ static constexpr double FIB31_OFF = -25.;
 
 static double neulandPaddleOffset(int paddle)
 {
+        // Provenance: extracted by aligning the gamma-flash peak of the PROJECTED
+        // ToF,  t_proj = t_meas * (L_REF / L_hit),  per bar, with the convention
+        //     t_proj_measured + offset = const.
+        // The original table was indexed by the ROOT *bin number* of a
+        // TH2(..., 1300, 0, 1300); there bin k covers [k-1, k), so an integer
+        // paddle p lands in bin p+1. The values below are already shifted to
+        // PADDLE numbering (paddle = bin - 1); the old bin id is in the comment.
         static const std::array<double, 1300> offsets = []
         {
                 std::array<double, 1300> values{};
-                values[19 - 1] = 2.1280;
-                values[30 - 1] = 1.3686;
-                values[62 - 1] = -3.3266;
-                values[72 - 1] = -3.3507;
-                values[79 - 1] = -0.6977;
-                values[88 - 1] = -3.1225;
-                values[115 - 1] = 4.6680;
-                values[166 - 1] = 2.5123;
-                values[167 - 1] = -2.5644;
-                values[168 - 1] = 4.5560;
-                values[201 - 1] = 5.1455;
-                values[233 - 1] = 2.9769;
-                values[280 - 1] = 3.8662;
-                values[295 - 1] = 2.7434;
-                values[339 - 1] = 3.2547;
-                values[371 - 1] = -3.4727;
-                values[393 - 1] = 6.0279;
-                values[456 - 1] = -2.7744;
-                values[599 - 1] = 3.3694;
-                values[622 - 1] = 5.0871;
-                values[663 - 1] = 3.1136;
-                values[765 - 1] = 7.2081;
-                values[767 - 1] = 2.5812;
-                values[875 - 1] = 7.2277;
-                values[930 - 1] = 2.7249;
-                values[934 - 1] = 1.8959;
-                values[981 - 1] = 0.7595;
-                values[1028 - 1] = 2.0740;
-                values[1162 - 1] = 4.9011;
-                values[1165 - 1] = 2.4801;
-                values[1191 - 1] = 1.9692;
-                values[1227 - 1] = -1.6468;
-                values[1273 - 1] = 2.5166;
+                values[18 - 1] = 2.1280;     // bin 19
+                values[29 - 1] = 1.3686;     // bin 30
+                values[61 - 1] = -3.3266;    // bin 62
+                values[71 - 1] = -3.3507;    // bin 72
+                values[78 - 1] = -0.6977;    // bin 79
+                values[87 - 1] = -3.1225;    // bin 88
+                values[114 - 1] = 4.6680;    // bin 115
+                values[165 - 1] = 2.5123;    // bin 166
+                values[166 - 1] = -2.5644;   // bin 167
+                values[167 - 1] = 4.5560;    // bin 168
+                values[200 - 1] = 5.1455;    // bin 201
+                values[232 - 1] = 2.9769;    // bin 233
+                values[279 - 1] = 3.8662;    // bin 280
+                values[294 - 1] = 2.7434;    // bin 295
+                values[338 - 1] = 3.2547;    // bin 339
+                values[370 - 1] = -3.4727;   // bin 371
+                values[392 - 1] = 6.0279;    // bin 393
+                values[455 - 1] = -2.7744;   // bin 456
+                values[598 - 1] = 3.3694;    // bin 599
+                values[621 - 1] = 5.0871;    // bin 622
+                values[662 - 1] = 3.1136;    // bin 663
+                values[764 - 1] = 7.2081;    // bin 765
+                values[766 - 1] = 2.5812;    // bin 767
+                values[874 - 1] = 7.2277;    // bin 875
+                values[929 - 1] = 2.7249;    // bin 930
+                values[933 - 1] = 1.8959;    // bin 934
+                values[980 - 1] = 0.7595;    // bin 981
+                values[1027 - 1] = 2.0740;   // bin 1028
+                values[1161 - 1] = 4.9011;   // bin 1162
+                values[1164 - 1] = 2.4801;   // bin 1165
+                values[1190 - 1] = 1.9692;   // bin 1191
+                values[1226 - 1] = -1.6468;  // bin 1227
+                values[1272 - 1] = 2.5166;   // bin 1273
                 return values;
         }();
 
         return paddle >= 1 && paddle <= (int)offsets.size()
                    ? offsets[paddle - 1]
                    : 0.0;
+}
+
+// ─── NeuLAND time / geometry helpers ──────────────────────────────
+
+static constexpr double NEULAND_LREF_CM = 1557.0; // reference flight path used
+                                                  // to build the projected ToF
+static constexpr double NEULAND_TMAX_NS = 76.0;   // upper time cut
+
+/// Raw hit time with the per-bar offset applied.
+/// The offset was extracted in projected-ToF space,
+///     t_proj = t * (L_REF / L),   t_proj + D = const,
+/// so on the raw time it must be scaled by L / L_REF (NOT L_REF / L).
+static inline double neulandCorrectedTime(double rawT, const TVector3 &pos, int paddle)
+{
+        const double L = pos.Mag();
+        if (L <= 0.0)
+                return rawT;
+        return rawT + (L / NEULAND_LREF_CM) * neulandPaddleOffset(paddle);
+}
+
+/// True for bars sitting in a horizontally-oriented plane.
+/// Paddle ids are 1-based, so the plane index is (paddle - 1) / 50.
+static inline bool neulandPlaneIsHorizontal(int paddle)
+{
+        return (((paddle - 1) / 50) % 2) == 0;
+}
+
+/// Hit position smeared uniformly over the bar cross-section, along the two
+/// unmeasured coordinates of the corresponding plane.
+static inline TVector3 neulandSmearedPosition(const TVector3 &pos, int paddle,
+                                              TRandom3 &rng)
+{
+        if (neulandPlaneIsHorizontal(paddle))
+                return TVector3(pos.X(),
+                                pos.Y() + rng.Uniform(-2.5, 2.5),
+                                pos.Z() + rng.Uniform(-2.5, 2.5));
+        return TVector3(pos.X() + rng.Uniform(-2.5, 2.5),
+                        pos.Y(),
+                        pos.Z() + rng.Uniform(-2.5, 2.5));
 }
 
 // ─── 25F incoming graphical cut (polygon from TCutG) ────────────────────────
@@ -114,7 +160,7 @@ struct NFirst
 struct NAllHits
 {
         std::vector<int> paddle;
-        std::vector<double> x, y, z, t;
+        std::vector<double> x, y, z, t, e;
 };
 
 /// All PID / kinematic cuts for a single reaction channel.
@@ -546,30 +592,27 @@ static ROOT::RDF::RNode defineNeutronColumns(ROOT::RDF::RNode node)
         return node
             .Define("n_first", [](TClonesArray &nl)
                     {
-            int idx = -1;  double bestZ = 1e99, bestT = -1;
+            int idx = -1;
+            double bestZ = 1e99, bestT = -1;
             TVector3 bestPos(0, 0, 0);
+            static thread_local TRandom3 rng(0);
+
             for (int i = 0; i < nl.GetEntriesFast(); ++i)
             {
                 auto *h = static_cast<R3BNeulandHit *>(nl.UncheckedAt(i));
-                double z = h->GetPosition().Z(), t = h->GetT();
-                if (t <= 76.0 && z < bestZ)
-                {
-                    bestZ = z;  bestT = t;  idx = i;
-                    TVector3 pos = h->GetPosition();
-                    int paddle = h->GetPaddle();
-                                        double flightLength = pos.Mag();
-                                        if (flightLength > 0)
-                                                bestT += 1557.0 / flightLength * neulandPaddleOffset(paddle);
-                    static thread_local TRandom3 rng(0);
-                    if (((paddle / 50) % 2) == 0)
-                        bestPos.SetXYZ(pos.X(),
-                                       pos.Y() + rng.Uniform(-2.5, 2.5),
-                                       pos.Z() + rng.Uniform(-2.5, 2.5));
-                    else
-                        bestPos.SetXYZ(pos.X() + rng.Uniform(-2.5, 2.5),
-                                       pos.Y(),
-                                       pos.Z() + rng.Uniform(-2.5, 2.5));
-                }
+                const TVector3 pos = h->GetPosition();
+                const int paddle = h->GetPaddle();
+
+                const double t = neulandCorrectedTime(h->GetT(), pos, paddle);
+                if (t > NEULAND_TMAX_NS)
+                    continue;
+                if (pos.Z() >= bestZ)
+                    continue;
+
+                bestZ = pos.Z();
+                bestT = t;
+                idx = i;
+                bestPos = neulandSmearedPosition(pos, paddle, rng);
             }
             return NFirst{idx, bestT, bestPos}; }, {"NeulandHits"})
             .Filter([](const NFirst &nf)
@@ -608,34 +651,25 @@ static ROOT::RDF::RNode defineNeutronColumns(ROOT::RDF::RNode node)
                     {
             NAllHits out;
             static thread_local TRandom3 rng(0);
+
             for (int i = 0; i < nl.GetEntriesFast(); ++i)
             {
                 auto *h = static_cast<R3BNeulandHit *>(nl.UncheckedAt(i));
-                double t = h->GetT();
-                if (t > 76.0)
+                const TVector3 pos = h->GetPosition();
+                const int paddle = h->GetPaddle();
+
+                const double t = neulandCorrectedTime(h->GetT(), pos, paddle);
+                if (t > NEULAND_TMAX_NS)
                     continue;
 
-                TVector3 pos = h->GetPosition();
-                int paddle = h->GetPaddle();
-                double flightLength = pos.Mag();
-                if (flightLength > 0)
-                    t += 1557.0 / flightLength * neulandPaddleOffset(paddle);
-
-                TVector3 smeared;
-                if (((paddle / 50) % 2) == 0)
-                    smeared.SetXYZ(pos.X(),
-                                   pos.Y() + rng.Uniform(-2.5, 2.5),
-                                   pos.Z() + rng.Uniform(-2.5, 2.5));
-                else
-                    smeared.SetXYZ(pos.X() + rng.Uniform(-2.5, 2.5),
-                                   pos.Y(),
-                                   pos.Z() + rng.Uniform(-2.5, 2.5));
+                const TVector3 smeared = neulandSmearedPosition(pos, paddle, rng);
 
                 out.paddle.push_back(paddle);
                 out.x.push_back(smeared.X());
                 out.y.push_back(smeared.Y());
                 out.z.push_back(smeared.Z());
                 out.t.push_back(t);
+                out.e.push_back(h->GetE());
             }
             return out; }, {"NeulandHits"})
             .Define("n_paddle", [](const NAllHits &a)
@@ -647,7 +681,9 @@ static ROOT::RDF::RNode defineNeutronColumns(ROOT::RDF::RNode node)
             .Define("n_z", [](const NAllHits &a)
                     { return a.z; }, {"n_all"})
             .Define("n_t", [](const NAllHits &a)
-                    { return a.t; }, {"n_all"});
+                    { return a.t; }, {"n_all"})
+            .Define("n_e", [](const NAllHits &a)
+                    { return a.e; }, {"n_all"});
 }
 
 // ─── Output column lists ────────────────────────────────────────────────────
@@ -684,7 +720,7 @@ static std::vector<std::string> buildOutputColumns(bool hasNeutrons)
         if (hasNeutrons)
                 cols.insert(cols.end(), {"px_neu", "py_neu", "pz_neu",
                                          "x_neu_hit", "y_neu_hit", "z_neu_hit", "tof_neuland",
-                                         "n_paddle", "n_x", "n_y", "n_z", "n_t"});
+                                         "n_paddle", "n_x", "n_y", "n_z", "n_t", "n_e"});
 
         cols.insert(cols.end(), {"px_in", "py_in", "pz_in"});
 

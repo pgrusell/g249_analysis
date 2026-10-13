@@ -6,18 +6,58 @@
 //  final/macros/data_reduction/eventFilter.C (tree "FilterDataTree") for the
 //  25F -> 22O + 2n selection.
 //
-//  The NeuLAND hits of each event are grouped into clusters in position and
-//  time: two hits belong to the same cluster when they are closer than dR in
-//  space and dT in time (single linkage). Both cuts are tunable with
-//  setClusterCuts(dR, dT); the defaults, 50 cm and 5 ns, connect hits at
-//  10 cm/ns, well below the neutron velocity, so a joined pair is always
-//  compatible with one particle.
+//  The NeuLAND hits of each event are grouped into clusters by causality, with
+//  causalClustering.h (see the long comment there): two hits are joined when,
+//  within the detector resolution, one particle emitted at the earlier hit
+//  could have produced the later one, either a scattered neutron / recoil no
+//  faster than the incident neutron, or a prompt gamma travelling at c. The
+//  clusters are grown by single linkage under that relation. The resolutions
+//  (setResolutions), the width of the window (setCausalSigma), the gamma
+//  branch (setGammaBranch, setBeamBetaWindow) and the strict-to-first-hit
+//  systematic (setStrictToFirst) are all tunable; causalAcceptance() prints
+//  the n-n relative energy below which a genuine pair is merged.
 //
-//  Events with exactly two clusters are taken as the 2n candidates. Each
+//  The old clustering, a fixed sphere (two hits closer than dR in space and dT
+//  in time, 50 cm and 5 ns by default, setClusterCuts), is kept for comparison
+//  and selected with setUseCausal(false). It fails in three ways at once: it
+//  merges genuine pairs closer than dR, it splits real scattering chains
+//  slower than dR / dT, and it lets a gamma emitted at the first interaction
+//  through as a second neutron.
+//
+//  Two clusters alone do not mean two neutrons: one neutron that scatters and
+//  interacts again further on also leaves two groups of hits, and then the
+//  second neutron was simply missed. With the sphere this was handled by a
+//  causality test between the clusters (ned2TwoNeutrons): the apparent
+//  velocity between their earliest hits, dr / (c dt), had to exceed the
+//  neutron velocity. With causal clustering that test is subsumed and it is
+//  OFF by default (g2NBetaRelCut = 0): two clusters that survive the causal
+//  clustering are, by construction, not connectable by any particle through
+//  ANY pair of their hits, which is strictly stronger than comparing only
+//  their two earliest hits. setCausalityCut(-1) switches the old test back on
+//  (on top of either clustering), which is what the sphere selection used.
+//
+//  Every cluster must also look like a neutron (causal::neutronLike): the
+//  velocity implied by its first hit in time, beta0 = |r| / (c t), has to lie
+//  inside a window, 0.55 - 0.90 by default (setNeutronBetaWindow, lo >= hi
+//  switches it off). Without it a cluster of gammas (beta0 ~ 1) enters as a
+//  neutron and pushes Erel up.
+//
+//  The exact selection used before the causal clustering is recovered with
+//      setUseCausal(false); setCausalityCut(-1); setNeutronBetaWindow(0, 0);
+//
+//  The surviving events with exactly two clusters are the 2n candidates. Each
 //  cluster gives one neutron, and Erel is built from the invariant mass of
 //  fragment + n1 + n2 in two ways: taking the first hit in z of each cluster,
 //  and taking the first hit in time of each cluster. Both numbers appear in
-//  the panel of the display and as the two spectra of the second canvas.
+//  the panel of the display and as spectra of the second canvas, which shows a
+//  pad per definition and holds a
+//  third one with the events where the two criteria pick the same hit in both
+//  clusters, where the two definitions give the same energy, and a fourth one
+//  that keeps, event by event, whichever of the two choices gives the smaller
+//  relative energy.
+//
+//  Events with a single cluster, that is one neutron seen and one missed, are
+//  outside the selection from the start, as are events with more clusters.
 //
 //  Six projections of the hit coordinates are shown per event:
 //      y vs x   (front view)      t vs x
@@ -37,8 +77,14 @@
 //  Then, at the ROOT prompt (or with the buttons of the control panel):
 //      nextEvent2n()        prevEvent2n()      randomEvent2n()
 //      showEvent2n(entry)   printEvent2n()     saveEvent2n("name.png")
-//      setClusterCuts(50, 5)                   setRequiredClusters(2)
+//      setUseCausal(true)   setCausalSigma(2)  setResolutions(4, 0.15)
+//      setGammaBranch(true) setBeamBetaWindow(0.70, 0.80)
+//      setStrictToFirst(false)                 causalAcceptance(1300, 0.75)
+//      setNeutronBetaWindow(0.55, 0.90)        (lo >= hi switches it off)
+//      setClusterCuts(50, 5)  (sphere only)    setRequiredClusters(2)
+//      setCausalityCut(0)   (<0 event neutron velocity, 0 off, >0 fixed)
 //      setMinHits2n(4)      applyCut2n("beta_neu>0.6")
+//          (setMinHits2n asks for that many hits in every cluster)
 //      setQFS2n(false)      setRange2n("t", 55, 80)
 //      loadOffsets2n("23O1n.txt")              erelSpectrum2n(100, -5, 20)
 //      ned2nHelp()
@@ -91,6 +137,8 @@
 #include "TGLabel.h"
 #include "TGNumberEntry.h"
 
+#include "causalClustering.h"
+
 // ─── Configuration ──────────────────────────────────────────────────────────
 
 static const char *k2NDefaultFile =
@@ -105,7 +153,7 @@ static constexpr double k2NOpaMax = 1.65;
 static constexpr double k2NMn = 0.939565;  // neutron mass [GeV]
 static constexpr double k2NC = 29.9792458; // speed of light [cm/ns]
 
-static const char *k2NDefaultOffsets = "23O1n.txt";
+static const char *k2NDefaultOffsets = "22O2n.txt";
 static const char *k2NSettingsDir =
     "/nucl_lustre/pablogrusell/g249/g249_analysis/final/settings/";
 
@@ -155,16 +203,32 @@ static double g2NBetaMatch = 0.;
 static TString g2NOffsetsFile = "";
 
 // clustering
+static causal::Config g2NCausal; // resoluciones y ventana de causalidad
+static bool g2NUseCausal = true; // false vuelve a la esfera
+
+// sphere clustering, only used with g2NUseCausal = false
 static double g2NdR = 50.; // maximum distance between two hits of a cluster [cm]
 static double g2NdT = 5.;  // maximum time difference between them [ns]
+
+// causality test between the two clusters: a negative value compares the
+// apparent velocity with the neutron velocity of the event itself, a positive
+// one with that fixed value, and zero switches the test off. Off by default:
+// the causal clustering already guarantees that no particle connects any pair
+// of hits of two different clusters (see the header of the macro)
+static double g2NBetaRelCut = 0.;
+
+// cluster quality: window on beta0, the velocity implied by the first hit in
+// time of every cluster (causal::neutronLike). lo >= hi switches it off
+static double g2NNeuBetaLo = 0.55;
+static double g2NNeuBetaHi = 0.90;
 
 // selection
 static std::vector<Long64_t> g2NList; // tree entries passing the selection
 static int g2NPos = 0;                // current position inside g2NList
 static Long64_t g2NEntry = -1;        // current tree entry
 static bool g2NInList = false;        // is that entry part of the selection?
-static int g2NMinHits = 1;
-static int g2NReqClusters = 2; // 0 keeps every cluster multiplicity
+static int g2NMinHits = 1;            // minimum number of hits in every cluster
+static int g2NReqClusters = 2;        // 0 keeps every cluster multiplicity
 static TString g2NCut = "";
 static bool g2NQFS = true;
 
@@ -180,6 +244,8 @@ static TH3F *g2NFrame3D = nullptr;
 static TCanvas *g2NErelCanvas = nullptr;
 static TH1F *g2NErelPos = nullptr;  // first hit in z of each cluster
 static TH1F *g2NErelTime = nullptr; // first hit in time of each cluster
+static TH1F *g2NErelSame = nullptr; // events where both criteria agree
+static TH1F *g2NErelMin = nullptr;  // the smaller of the two energies
 static int g2NErelBins = 100;
 static double g2NErelLo = -5.;
 static double g2NErelHi = 20.;
@@ -210,6 +276,8 @@ struct N2Cluster
     double zMin = 0.;
     double tMin = 0.;
 };
+
+static double ned2HitBeta(int hit);
 
 // ─── Small helpers ──────────────────────────────────────────────────────────
 
@@ -345,7 +413,7 @@ static void ned2ComputeRanges()
 /// Single linkage clustering of the hits of the current event: two hits are
 /// joined when they are within g2NdR in space and g2NdT in time. Clusters come
 /// back ordered by the z of their first hit.
-static std::vector<N2Cluster> ned2FindClusters()
+static std::vector<N2Cluster> ned2FindClustersSphere()
 {
     std::vector<N2Cluster> clusters;
     const int n = (int)g2NX->size();
@@ -409,6 +477,135 @@ static std::vector<N2Cluster> ned2FindClusters()
               { return a.zMin < b.zMin; });
 
     return clusters;
+}
+
+/// Clusters of the current event, causal (causalClustering.h) or sphere
+/// depending on g2NUseCausal. Causal clusters come back ordered by the time of
+/// their first interaction, sphere clusters by z: Erel does not care, but the
+/// cluster labels of the display do.
+static std::vector<N2Cluster> ned2FindClusters()
+{
+    if (!g2NUseCausal)
+        return ned2FindClustersSphere();
+
+    const std::vector<causal::Cluster> cc =
+        causal::findClusters(*g2NX, *g2NY, *g2NZ, *g2NT, g2NCausal);
+
+    std::vector<N2Cluster> out;
+    out.reserve(cc.size());
+    for (const causal::Cluster &c : cc)
+    {
+        N2Cluster n;
+        n.hits = c.hits;
+        n.firstZ = c.firstZ;
+        n.firstT = c.firstT;
+        n.zMin = c.zMin;
+        n.tMin = c.tMin;
+        out.push_back(n);
+    }
+    return out;
+}
+
+/// Every cluster of the event has to reach the required number of hits, so
+/// that no neutron is built on a group too small to place an interaction
+/// point. An event without clusters never qualifies.
+static bool ned2ClustersBigEnough(const std::vector<N2Cluster> &cl)
+{
+    if (cl.empty())
+        return false;
+
+    for (const N2Cluster &c : cl)
+        if ((int)c.hits.size() < g2NMinHits)
+            return false;
+
+    return true;
+}
+
+static bool ned2NeutronBetaCutOn() { return g2NNeuBetaLo < g2NNeuBetaHi; }
+
+/// Does one cluster look like a neutron? The velocity implied by its first hit
+/// in time has to fall inside [g2NNeuBetaLo, g2NNeuBetaHi]: a gamma cluster
+/// sits at beta0 ~ 1, noise anywhere. Minimum hits are handled apart.
+static bool ned2NeutronLike(const N2Cluster &c)
+{
+    if (!ned2NeutronBetaCutOn())
+        return true;
+
+    causal::Cluster cc;
+    cc.hits = c.hits;
+    cc.firstT = c.firstT;
+    cc.beta0 = ned2HitBeta(c.firstT);
+    return causal::neutronLike(cc, g2NCausal, 1, g2NNeuBetaLo, g2NNeuBetaHi);
+}
+
+/// Every cluster of the event has to look like a neutron.
+static bool ned2ClustersNeutronLike(const std::vector<N2Cluster> &cl)
+{
+    for (const N2Cluster &c : cl)
+        if (!ned2NeutronLike(c))
+            return false;
+    return true;
+}
+
+// ─── Are the two clusters two neutrons? ─────────────────────────────────────
+
+/// Velocity of the neutron that would have produced a hit, from the flight
+/// path and the time of flight.
+static double ned2HitBeta(int hit)
+{
+    if (hit < 0 || hit >= (int)g2NX->size())
+        return -1.;
+
+    const double x = (*g2NX)[hit], y = (*g2NY)[hit], z = (*g2NZ)[hit];
+    const double t = (*g2NT)[hit];
+    if (t <= 0.)
+        return -1.;
+
+    return std::sqrt(x * x + y * y + z * z) / (k2NC * t);
+}
+
+/// Apparent velocity between the earliest hits of the two clusters. A single
+/// particle can only connect them when this stays below its own velocity.
+static double ned2BetaRel(const std::vector<N2Cluster> &cl)
+{
+    if (cl.size() != 2)
+        return -1.;
+
+    const int a = cl[0].firstT, b = cl[1].firstT;
+    const double dx = (*g2NX)[a] - (*g2NX)[b];
+    const double dy = (*g2NY)[a] - (*g2NY)[b];
+    const double dz = (*g2NZ)[a] - (*g2NZ)[b];
+    const double dt = std::abs((*g2NT)[a] - (*g2NT)[b]);
+
+    if (dt <= 0.) // same time, far apart: two particles for sure
+        return 1e9;
+
+    return std::sqrt(dx * dx + dy * dy + dz * dz) / (k2NC * dt);
+}
+
+/// Velocity the two clusters have to beat to count as two neutrons.
+static double ned2BetaRelThreshold(const std::vector<N2Cluster> &cl)
+{
+    if (g2NBetaRelCut > 0.)
+        return g2NBetaRelCut;
+
+    // the neutron cannot scatter and then move faster than it arrived
+    return std::max(ned2HitBeta(cl[0].firstT), ned2HitBeta(cl[1].firstT));
+}
+
+/// True when no single neutron could have made both clusters.
+static bool ned2TwoNeutrons(const std::vector<N2Cluster> &cl)
+{
+    if (cl.size() != 2)
+        return false;
+    if (g2NBetaRelCut == 0.)
+        return true;
+
+    const double thr = ned2BetaRelThreshold(cl);
+    if (thr <= 0.) // a hit with no usable time, the test cannot be made
+        return false;
+
+    return ned2BetaRel(cl) > thr;
 }
 
 // ─── Relative energy ────────────────────────────────────────────────────────
@@ -561,18 +758,41 @@ static void ned2Rescan()
         }
     }
 
+    // denominators: events passing QFS and the user cut, with at least one hit,
+    // split by cluster multiplicity 0, 1, 2, 3, > 3. The second row counts only
+    // events whose clusters all pass the quality cuts (hits and beta0)
+    Long64_t nPre = 0, nHit = 0;
+    Long64_t nMult[5] = {0, 0, 0, 0, 0};
+    Long64_t nMultGood[5] = {0, 0, 0, 0, 0};
+
     const Long64_t n = g2NTree->GetEntries();
     for (Long64_t i = 0; i < n; ++i)
     {
         g2NTree->GetEntry(i);
-        if ((int)g2NX->size() < g2NMinHits)
-            continue;
         if (g2NQFS && (g2NOpa <= k2NOpaMin || g2NOpa >= k2NOpaMax))
             continue;
         if (form && form->EvalInstance(0) == 0)
             continue;
-        if (g2NReqClusters > 0 &&
-            (int)ned2FindClusters().size() != g2NReqClusters)
+
+        const std::vector<N2Cluster> cl = ned2FindClusters();
+
+        ++nPre;
+        if (!g2NX->empty())
+            ++nHit;
+        const int m = std::min((int)cl.size(), 4);
+        ++nMult[m];
+        if (!cl.empty() && ned2ClustersBigEnough(cl) && ned2ClustersNeutronLike(cl))
+            ++nMultGood[m];
+
+        if (g2NReqClusters > 0 && (int)cl.size() != g2NReqClusters)
+            continue;
+        if (!ned2ClustersBigEnough(cl))
+            continue;
+        if (!ned2ClustersNeutronLike(cl))
+            continue;
+        // a pair a single neutron could have made means the other one was
+        // missed, so the event is not a 2n candidate
+        if (g2NReqClusters == 2 && !ned2TwoNeutrons(cl))
             continue;
 
         g2NList.push_back(i);
@@ -584,15 +804,40 @@ static void ned2Rescan()
         erelSpectrum2n(g2NErelBins, g2NErelLo, g2NErelHi);
 
     std::cout << "[OK] " << g2NList.size() << " / " << n
-              << " events pass the selection (minHits = " << g2NMinHits;
+              << " events pass the selection (>= " << g2NMinHits
+              << " hits per cluster";
     if (g2NReqClusters > 0)
         std::cout << ", " << g2NReqClusters << " clusters";
-    std::cout << ", dR = " << g2NdR << " cm, dT = " << g2NdT << " ns";
+    if (ned2NeutronBetaCutOn())
+        std::cout << ", " << g2NNeuBetaLo << " < beta0 < " << g2NNeuBetaHi;
+    if (g2NReqClusters == 2 && g2NBetaRelCut != 0.)
+        std::cout << ", causality "
+                  << (g2NBetaRelCut > 0.
+                          ? Form("beta_rel > %.2f", g2NBetaRelCut)
+                          : "beta_rel > neutron velocity");
+    if (g2NUseCausal)
+        std::cout << Form(", causal nSigma = %.2f, sigmaR = %.1f cm, sigmaT = %.3f ns,"
+                          " gamma branch %s",
+                          g2NCausal.nSigma, g2NCausal.sigmaR, g2NCausal.sigmaT,
+                          g2NCausal.gammaBranch ? "on" : "off");
+    else
+        std::cout << ", sphere dR = " << g2NdR << " cm, dT = " << g2NdT << " ns";
     if (g2NQFS)
         std::cout << ", QFS " << k2NOpaMin << " < califa_opa < " << k2NOpaMax;
     if (!g2NCut.IsNull())
         std::cout << ", cut = \"" << g2NCut << "\"";
     std::cout << ")\n";
+
+    std::cout << "     " << nPre << " events after QFS/cut, " << nHit
+              << " with >= 1 hit. Cluster multiplicity:\n"
+              << Form("     %-22s %8s %8s %8s %8s %8s\n",
+                      "", "0", "1", "2", "3", ">3")
+              << Form("     %-22s %8lld %8lld %8lld %8lld %8lld\n", "all",
+                      nMult[0], nMult[1], nMult[2], nMult[3], nMult[4])
+              << Form("     %-22s %8lld %8lld %8lld %8lld %8lld\n",
+                      "all clusters pass qual.",
+                      nMultGood[0], nMultGood[1], nMultGood[2], nMultGood[3],
+                      nMultGood[4]);
 
     g2NPos = 0;
 }
@@ -706,6 +951,18 @@ static void ned2DrawInfo(const std::vector<N2Cluster> &cl)
 
     if (cl.size() == 2)
     {
+        const double bRel = ned2BetaRel(cl);
+        const double bThr = ned2BetaRelThreshold(cl);
+        const bool two = ned2TwoNeutrons(cl);
+
+        pt->AddText(Form("#beta_{rel} = %s   (%s)",
+                         bRel > 1e8 ? "#infty" : Form("%.2f", bRel),
+                         g2NBetaRelCut == 0.
+                             ? "test off"
+                             : TString::Format("threshold %.2f", bThr).Data()));
+        pt->AddText(two ? "#color[418]{two neutrons}"
+                        : "#color[633]{one neutron scattered, partner missed}");
+
         const double ePos = ned2ErelByPosition(cl);
         const double eTime = ned2ErelByTime(cl);
         pt->AddText(ePos > -900. ? Form("#bf{E_{rel} (first in z) = %.3f MeV}",
@@ -730,7 +987,14 @@ static void ned2DrawInfo(const std::vector<N2Cluster> &cl)
                      g2NOpa, g2NOpa * TMath::RadToDeg()));
     if (g2NQFS)
         pt->AddText(Form("#it{QFS window %.2f - %.2f rad}", k2NOpaMin, k2NOpaMax));
-    pt->AddText(Form("#it{clusters: dR < %.0f cm, dt < %.0f ns}", g2NdR, g2NdT));
+    if (g2NUseCausal)
+        pt->AddText(Form("#it{causal clusters: %.1f#sigma, #sigma_{R} = %.1f cm, "
+                         "#sigma_{t} = %.2f ns, #geq %d hits}",
+                         g2NCausal.nSigma, g2NCausal.sigmaR, g2NCausal.sigmaT,
+                         g2NMinHits));
+    else
+        pt->AddText(Form("#it{clusters: dR < %.0f cm, dt < %.0f ns, #geq %d hits}",
+                         g2NdR, g2NdT, g2NMinHits));
     pt->AddText("#it{star: first in z, square: first in time}");
     pt->Draw();
 }
@@ -866,6 +1130,8 @@ static void ned2FillErelSpectrum()
 
     g2NErelPos->Reset();
     g2NErelTime->Reset();
+    g2NErelSame->Reset();
+    g2NErelMin->Reset();
 
     const Long64_t keep = g2NEntry;
     int nTwo = 0, nSameHits = 0;
@@ -875,23 +1141,34 @@ static void ned2FillErelSpectrum()
         g2NTree->GetEntry(g2NList[i]);
 
         const std::vector<N2Cluster> cl = ned2FindClusters();
-        if (cl.size() != 2)
+        if (cl.size() != 2 || !ned2TwoNeutrons(cl))
             continue;
         ++nTwo;
 
-        if (cl[0].firstZ == cl[0].firstT && cl[1].firstZ == cl[1].firstT)
+        const bool sameHits = (cl[0].firstZ == cl[0].firstT &&
+                               cl[1].firstZ == cl[1].firstT);
+        if (sameHits)
             ++nSameHits;
 
         const double ePos = ned2ErelByPosition(cl);
         if (ePos > -900.)
+        {
             g2NErelPos->Fill(ePos * 1000.);
+            // both criteria pick the same hits, so the two values coincide
+            if (sameHits)
+                g2NErelSame->Fill(ePos * 1000.);
+        }
 
         const double eTime = ned2ErelByTime(cl);
         if (eTime > -900.)
             g2NErelTime->Fill(eTime * 1000.);
+
+        // take, event by event, whichever hit gives the smaller energy
+        if (ePos > -900. && eTime > -900.)
+            g2NErelMin->Fill(std::min(ePos, eTime) * 1000.);
     }
 
-    std::cout << "[OK] Erel over " << nTwo << " two cluster events: "
+    std::cout << "[OK] Erel over " << nTwo << " 2n candidates: "
               << "first in z <Erel> = " << g2NErelPos->GetMean() << " MeV, "
               << "first in time <Erel> = " << g2NErelTime->GetMean() << " MeV, "
               << "both criteria agree in " << nSameHits << " events ("
@@ -914,15 +1191,31 @@ void erelSpectrum2n(int nbins, double lo, double hi)
 
     delete g2NErelPos;
     delete g2NErelTime;
+    delete g2NErelSame;
+    delete g2NErelMin;
 
-    g2NErelPos = new TH1F("ned2ErelPos", "E_{rel} (2n);E_{rel} [MeV];counts",
+    g2NErelPos = new TH1F("ned2ErelPos",
+                          "E_{rel} (2n), first hit in z of each cluster"
+                          ";E_{rel} [MeV];counts",
                           nbins, lo, hi);
-    g2NErelTime = new TH1F("ned2ErelTime", "E_{rel} (2n);E_{rel} [MeV];counts",
+    g2NErelTime = new TH1F("ned2ErelTime",
+                           "E_{rel} (2n), first hit in time of each cluster"
+                           ";E_{rel} [MeV];counts",
                            nbins, lo, hi);
+    g2NErelSame = new TH1F("ned2ErelSame",
+                           "E_{rel} (2n), same hit in z and time in both clusters"
+                           ";E_{rel} [MeV];counts",
+                           nbins, lo, hi);
+    g2NErelMin = new TH1F("ned2ErelMin",
+                          "E_{rel} (2n), whichever hit gives less energy"
+                          ";E_{rel} [MeV];counts",
+                          nbins, lo, hi);
 
     g2NErelPos->SetLineColor(kBlack);
     g2NErelTime->SetLineColor(kRed + 1);
-    for (TH1F *h : {g2NErelPos, g2NErelTime})
+    g2NErelSame->SetLineColor(kAzure + 2);
+    g2NErelMin->SetLineColor(kGreen + 2);
+    for (TH1F *h : {g2NErelPos, g2NErelTime, g2NErelSame, g2NErelMin})
     {
         h->SetLineWidth(2);
         h->SetStats(0);
@@ -931,45 +1224,72 @@ void erelSpectrum2n(int nbins, double lo, double hi)
     ned2FillErelSpectrum();
 
     if (!g2NErelCanvas)
-    {
         g2NErelCanvas = new TCanvas("cNeutron2nErel",
-                                    "Erel of the 2n candidates", 800, 600);
-        g2NErelCanvas->SetLeftMargin(0.13);
-        g2NErelCanvas->SetTicks(1, 1);
-    }
+                                    "Erel of the 2n candidates", 1100, 800);
 
     g2NErelCanvas->cd();
     g2NErelCanvas->Clear();
+    g2NErelCanvas->Divide(2, 2, 0.001, 0.001);
 
-    g2NErelPos->SetMaximum(1.25 * std::max(g2NErelPos->GetMaximum(),
-                                           g2NErelTime->GetMaximum()));
-    g2NErelPos->Draw("HIST");
-    g2NErelTime->Draw("HIST SAME");
+    TH1F *hist[4] = {g2NErelPos, g2NErelTime, g2NErelSame, g2NErelMin};
 
-    TLegend *leg = new TLegend(0.46, 0.64, 0.96, 0.83);
-    leg->SetBit(kCanDelete);
-    leg->SetBorderSize(0);
-    leg->SetFillStyle(0);
-    leg->SetTextSize(0.030);
-    leg->SetHeader("hit taken in each of the two clusters");
-    leg->AddEntry(g2NErelPos,
-                  Form("first in z: %d ev, %.2f MeV",
-                       (int)g2NErelPos->GetEntries(), g2NErelPos->GetMean()), "l");
-    leg->AddEntry(g2NErelTime,
-                  Form("first in time: %d ev, %.2f MeV",
-                       (int)g2NErelTime->GetEntries(), g2NErelTime->GetMean()), "l");
-    leg->Draw();
+    const TString clustering =
+        g2NUseCausal
+            ? TString::Format("causal %.1f#sigma (#sigma_{R} %.1f cm, #sigma_{t} %.2f ns, "
+                              "#gamma %s%s)",
+                              g2NCausal.nSigma, g2NCausal.sigmaR, g2NCausal.sigmaT,
+                              g2NCausal.gammaBranch ? "on" : "off",
+                              g2NCausal.strictToFirst ? ", strict" : "")
+            : TString::Format("dR < %.0f cm, dt < %.0f ns", g2NdR, g2NdT);
+    const TString betaWin =
+        ned2NeutronBetaCutOn()
+            ? TString::Format("%.2f < #beta_{0} < %.2f, ", g2NNeuBetaLo, g2NNeuBetaHi)
+            : TString("");
 
-    TLatex *sel = new TLatex(0.16, 0.86,
-                             Form("#it{%s, minHits = %d, dR < %.0f cm, dt < %.0f ns%s}",
-                                  g2NQFS ? Form("QFS %.2f - %.2f rad", k2NOpaMin, k2NOpaMax)
-                                         : "no QFS window",
-                                  g2NMinHits, g2NdR, g2NdT,
-                                  g2NCut.IsNull() ? "" : Form(", %s", g2NCut.Data())));
-    sel->SetBit(kCanDelete);
-    sel->SetNDC();
-    sel->SetTextSize(0.026);
-    sel->Draw();
+    const TString selection =
+        Form("#it{%s, %s, #geq %d hits/cluster, %s%s%s}",
+             g2NQFS ? Form("QFS %.2f - %.2f rad", k2NOpaMin, k2NOpaMax)
+                    : "no QFS window",
+             clustering.Data(), g2NMinHits, betaWin.Data(),
+             g2NBetaRelCut == 0.
+                 ? "no causality cut"
+                 : (g2NBetaRelCut > 0.
+                        ? Form("#beta_{rel} > %.2f", g2NBetaRelCut)
+                        : "#beta_{rel} > #beta_{n}"),
+             g2NCut.IsNull() ? "" : Form(", %s", g2NCut.Data()));
+
+    for (int i = 0; i < 4; ++i)
+    {
+        TVirtualPad *pad = g2NErelCanvas->cd(i + 1);
+        pad->SetLeftMargin(0.13);
+        pad->SetRightMargin(0.04);
+        pad->SetBottomMargin(0.12);
+        pad->SetTopMargin(0.10);
+        pad->SetTicks(1, 1);
+
+        hist[i]->SetMaximum(1.30 * hist[i]->GetMaximum());
+        hist[i]->Draw("HIST");
+
+        TLatex *num = new TLatex(0.17, 0.84,
+                                 Form("%d events, mean %.2f MeV",
+                                      (int)hist[i]->GetEntries(),
+                                      hist[i]->GetMean()));
+        num->SetBit(kCanDelete);
+        num->SetNDC();
+        num->SetTextSize(0.042);
+        num->Draw();
+
+        if (i == 0)
+        {
+            TLatex *sel = new TLatex(0.17, 0.78, selection);
+            sel->SetBit(kCanDelete);
+            sel->SetNDC();
+            sel->SetTextSize(0.034);
+            sel->Draw();
+        }
+
+        pad->Modified();
+    }
 
     g2NErelCanvas->Update();
 }
@@ -1067,6 +1387,14 @@ void printEvent2n()
     }
 
     if (cl.size() == 2)
+        std::cout << "beta_rel = " << ned2BetaRel(cl) << " (threshold "
+                  << ned2BetaRelThreshold(cl) << "), "
+                  << (ned2TwoNeutrons(cl)
+                          ? "two neutrons"
+                          : "one neutron scattered, partner missed")
+                  << "\n";
+
+    if (cl.size() == 2)
         std::cout << "Erel (first in z) = " << ned2ErelByPosition(cl) * 1000.
                   << " MeV, Erel (first in time) = "
                   << ned2ErelByTime(cl) * 1000. << " MeV\n\n";
@@ -1100,6 +1428,98 @@ void setClusterCuts(double dR, double dT)
     ned2ShowIndex(0);
 }
 
+/// Threshold on the apparent velocity between the two clusters. A negative
+/// value compares it with the neutron velocity of the event, so that pairs a
+/// single neutron could have made are rejected. Zero, the default, switches
+/// the test off (the causal clustering subsumes it), a positive value is used
+/// as a fixed threshold.
+void setCausalityCut(double betaMin = -1.)
+{
+    g2NBetaRelCut = betaMin;
+    ned2Rescan();
+    ned2ShowIndex(0);
+}
+
+/// Causal clustering (true, default) or the old fixed sphere (false).
+void setUseCausal(bool on)
+{
+    g2NUseCausal = on;
+    ned2Rescan();
+    ned2ShowIndex(0);
+}
+
+/// Width of the causality window in standard deviations (g2NCausal.nSigma).
+void setCausalSigma(double n)
+{
+    if (n <= 0.)
+    {
+        std::cerr << "[ERROR] setCausalSigma(n) needs n > 0\n";
+        return;
+    }
+    g2NCausal.nSigma = n;
+    ned2Rescan();
+    ned2ShowIndex(0);
+}
+
+/// One-hit position [cm] and time [ns] resolutions of the causal clustering.
+void setResolutions(double sigmaR, double sigmaT)
+{
+    if (sigmaR <= 0. || sigmaT <= 0.)
+    {
+        std::cerr << "[ERROR] setResolutions(sigmaR, sigmaT) needs positive values\n";
+        return;
+    }
+    g2NCausal.sigmaR = sigmaR;
+    g2NCausal.sigmaT = sigmaT;
+    ned2Rescan();
+    ned2ShowIndex(0);
+}
+
+/// Follow prompt gammas emitted at an interaction point into the same cluster.
+void setGammaBranch(bool on)
+{
+    g2NCausal.gammaBranch = on;
+    ned2Rescan();
+    ned2ShowIndex(0);
+}
+
+/// Beam velocity window of the gamma branch guard: a later hit whose apparent
+/// velocity from the target lies inside it is never taken as a gamma.
+/// lo >= hi switches the guard off.
+void setBeamBetaWindow(double lo, double hi)
+{
+    g2NCausal.beamBetaLo = lo;
+    g2NCausal.beamBetaHi = hi;
+    ned2Rescan();
+    ned2ShowIndex(0);
+}
+
+/// Link only against the earliest hit of a cluster (merging systematic).
+void setStrictToFirst(bool on)
+{
+    g2NCausal.strictToFirst = on;
+    ned2Rescan();
+    ned2ShowIndex(0);
+}
+
+/// Window on beta0, the velocity implied by the first hit in time of every
+/// cluster. lo >= hi switches the cut off.
+void setNeutronBetaWindow(double lo, double hi)
+{
+    g2NNeuBetaLo = lo;
+    g2NNeuBetaHi = hi;
+    ned2Rescan();
+    ned2ShowIndex(0);
+}
+
+/// n-n relative energy below which the causal clustering merges a genuine
+/// pair, for a flight path L [cm] and a neutron velocity beta, compared with
+/// the current sphere.
+void causalAcceptance(double L = 1300., double beta = 0.75)
+{
+    causal::printAcceptance(g2NCausal, L, beta, g2NdR);
+}
+
 /// Number of clusters an event must have to enter the selection, 0 for any.
 void setRequiredClusters(int n)
 {
@@ -1108,6 +1528,7 @@ void setRequiredClusters(int n)
     ned2ShowIndex(0);
 }
 
+/// Minimum number of hits every cluster of the event must have.
 void setMinHits2n(int n)
 {
     g2NMinHits = std::max(1, n);
@@ -1279,9 +1700,23 @@ void ned2nHelp()
               << "  showEvent2n(entry)       jump to a given tree entry\n"
               << "  printEvent2n()           hit table with cluster labels\n"
               << "  saveEvent2n(\"name.png\")  save the display canvas\n"
-              << "  setClusterCuts(50, 5)    dR [cm] and dt [ns] of a cluster\n"
+              << "  setUseCausal(true)       causal clustering, false = sphere\n"
+              << "  setCausalSigma(2)        causality window [sigma]\n"
+              << "  setResolutions(4, 0.15)  hit sigma_R [cm], sigma_t [ns]\n"
+              << "  setGammaBranch(true)     join prompt gammas to the cluster\n"
+              << "  setBeamBetaWindow(.7,.8) gamma branch guard, lo>=hi off\n"
+              << "  setStrictToFirst(false)  link only to the first hit\n"
+              << "  causalAcceptance(1300, 0.75)  merged Erel(nn) vs sphere\n"
+              << "  setNeutronBetaWindow(.55,.9) beta0 of every cluster,\n"
+              << "                           lo >= hi switches it off\n"
+              << "  setClusterCuts(50, 5)    sphere dR [cm] and dt [ns]\n"
               << "  setRequiredClusters(2)   cluster multiplicity, 0 for any\n"
-              << "  setMinHits2n(n)          keep events with >= n hits\n"
+              << "  setCausalityCut(0)       beta_rel threshold: <0 neutron\n"
+              << "                           velocity, 0 off, >0 fixed value\n"
+              << "  old sphere selection:    setUseCausal(false);\n"
+              << "                           setCausalityCut(-1);\n"
+              << "                           setNeutronBetaWindow(0, 0)\n"
+              << "  setMinHits2n(n)          every cluster needs >= n hits\n"
               << "  applyCut2n(\"beta_neu>0.6\") TTree cut on scalar branches\n"
               << "  setQFS2n(false)          drop the 1.25 < opa < 1.65 window\n"
               << "  setRange2n(\"t\", 50, 80)  axis range of x, y, z or t\n"
@@ -1350,4 +1785,33 @@ void neutronEventDisplay2n(const char *fileName = k2NDefaultFile,
     ned2ShowIndex(0);
     erelSpectrum2n();
     ned2nHelp();
+}
+
+void erel1nCheck(double sn = 4.2, int nbins = 100, double lo = 0., double hi = 20.)
+{
+    if (!ned2Ready())
+        return;
+    TH1F *h = new TH1F("ned2Check1n", "E_{exc} (1n);E_{exc} [MeV];counts", nbins, lo, hi);
+    const Long64_t keep = g2NEntry;
+    for (Long64_t i = 0; i < g2NTree->GetEntries(); ++i)
+    {
+        g2NTree->GetEntry(i);
+        if (g2NQFS && (g2NOpa <= k2NOpaMin || g2NOpa >= k2NOpaMax))
+            continue;
+        TLorentzVector sys, n;
+        if (!ned2FragmentP4(sys) || g2NTf <= 0. || g2NZf == 0.)
+            continue;
+        const double L = std::sqrt(g2NXf * g2NXf + g2NYf * g2NYf + g2NZf * g2NZf);
+        const double beta = L / (k2NC * g2NTf);
+        if (beta <= 0. || beta >= 1.)
+            continue;
+        TVector3 dir(g2NXf / g2NZf - g2NNeuOff[0], g2NYf / g2NZf - g2NNeuOff[1], 1.);
+        n.SetVectM(dir.Unit() * (k2NMn * beta / std::sqrt(1. - beta * beta)), k2NMn);
+        sys += n;
+        h->Fill((sys.M() - g2NMFrag - k2NMn) * 1000. + sn);
+    }
+    if (keep >= 0)
+        g2NTree->GetEntry(keep);
+    new TCanvas("cCheck1n", "check 1n", 800, 600);
+    h->Draw("HIST");
 }
