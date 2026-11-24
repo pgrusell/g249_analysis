@@ -1,30 +1,3 @@
-/** --------------------------------------------------------------------
- **
- **  Define the simulation setup for experiment G249
- **
- **  Last Update: 21/05/26
- **  Comments:
- **         - 22/07/25 : Initial setup
- **         - 21/05/26 : Switched primary generator to
- **                      R3BTheoreticalSPOMomdisGenerator. The fragment
- **                      momentum is now sampled from a theoretical SPO
- **                      distribution (TH3 in 25F rest frame), boosted
- **                      with an experimental parent-beta histogram, and
- **                      placed at a vertex drawn from an experimental
- **                      beam-spot (x,y) histogram, uniformly along the
- **                      5 cm target in z.
- **
- **  Inputs expected (TString paths set below):
- **    - fPMom3DFile  : ROOT file containing TH3  "h3_pxpypz" (GeV/c)
- **    - fVertexFile  : ROOT file containing TH2  "hVertexXY" (cm)
- **    - fBetaFile    : ROOT file containing TH1  "h"         (dimensionless)
- **
- **  Execute it as follows:
- **  root -l 'runsim.C(1000)'
- **  where 1000 means the number of events
- **
- **/
-
 void runsim(Int_t nEvents = 1000000)
 {
     // Timer
@@ -128,13 +101,12 @@ void runsim(Int_t nEvents = 1000000)
     }
     hBeta->SetDirectory(nullptr);
 
-    // We can safely close the input files now: histograms are detached.
     fPMom->Close();
     fVertex->Close();
     fBeta->Close();
 
     // Build and configure the generator.
-    // The name passed to the named constructor is used as the prefix for the
+    // The name passef to the named constructor is used as the prefix for the
     // truth side branches: "SPO_BetaParent", "SPO_PxRest", "SPO_PyRest",
     // "SPO_PzRest" (all Double_t, GeV/c for the rest-frame momentum).
     auto *spoGen = new R3BTheoreticalSPOMomdisGenerator("SPO");
@@ -145,17 +117,13 @@ void runsim(Int_t nEvents = 1000000)
     spoGen->SetBeamSpotHistXY(hVertexXY);
     spoGen->SetTargetHalfThicknessZ(fTargetHalfZ);
     spoGen->SetTargetCenter(0., 0., 0.);
-    spoGen->EnableTruthOutput(kTRUE);              // default; shown for clarity
-    spoGen->SetTruthOutputFile("glad.truth.root"); // sits next to glad.simu.root
+    spoGen->EnableTruthOutput(kTRUE);              
+    spoGen->SetTruthOutputFile("glad.truth.root"); 
 
     auto primGen = std::make_unique<FairPrimaryGenerator>();
     primGen->AddGenerator(spoGen); // ownership transferred
     run->SetGenerator(primGen.release());
 
-    // Register the fragment ion in the PDG database. This MUST happen
-    // before run->Init(), otherwise Geant4-VMC builds its particle table
-    // without the ion and FairPrimaryGenerator drops every primary with
-    // "PDG code <N> not found in database".
     run->AddNewIon(new FairIon(Form("Ion_Z%d_A%d", fFragZ, fFragA),
                                fFragZ, fFragA, fFragQ));
 
@@ -257,9 +225,4 @@ void runsim(Int_t nEvents = 1000000)
     timer.Stop();
     std::cout << "Real time: " << timer.RealTime() << "s, CPU time: " << timer.CpuTime() << "s" << std::endl;
     std::cout << "Macro finished successfully." << std::endl;
-
-    // Clean up the detached histograms (optional; process is about to exit).
-    delete h3_pxpypz;
-    delete hVertexXY;
-    delete hBeta;
 }
